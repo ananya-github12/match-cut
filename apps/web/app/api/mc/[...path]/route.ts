@@ -7,8 +7,11 @@
  * Each browser gets an anonymous visitor ID (HTTP-only cookie), sent to the API as the user, so
  * visitors to a public demo have their own briefs and their own rate limits.
  *
- * Deployed (Vercel): set MATCH_CUT_API_URL and MATCH_CUT_API_TOKEN (same value as the API's
- * DEV_API_TOKEN). Locally, both fall back to the workspace .env.
+ * Deployed on Vercel with services (vercel.json): the "api" binding injects MATCH_CUT_API_URL at
+ * runtime, and the token is the project's DEV_API_TOKEN, shared by every service.
+ * Web on Vercel with the API elsewhere (e.g. Railway): set MATCH_CUT_API_URL and
+ * MATCH_CUT_API_TOKEN (same value as the API's DEV_API_TOKEN).
+ * Locally, both fall back to the workspace .env.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -26,7 +29,8 @@ const VISITOR_ID = /^v_[0-9a-f]{32}$/;
 
 async function config(): Promise<{ url: string; token: string }> {
   const url = process.env.MATCH_CUT_API_URL;
-  const token = process.env.MATCH_CUT_API_TOKEN;
+  // Read per request, never at build time: service bindings resolve at runtime only.
+  const token = process.env.MATCH_CUT_API_TOKEN || process.env.DEV_API_TOKEN;
   if (url && token) return { url: url.replace(/\/$/, ""), token };
   // Local development: read the workspace .env (never needed in a deployment).
   const { loadEnv } = await import("@match-cut/core");

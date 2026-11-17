@@ -88,6 +88,27 @@ and use a Redis provider that supports `noeviction` (for example Upstash with ev
    may cap this lower. When a stream ends early, the app falls back to polling, so results still
    arrive.
 
+## Alternative: everything on Vercel (services)
+
+`vercel.json` at the repo root describes the whole app as one Vercel project:
+
+| Name | What | Reachable |
+| --- | --- | --- |
+| `web` | Next.js app (`apps/web`) | Public, at `/` |
+| `api` | Fastify API, built from `Dockerfile` (container) | Internal only |
+| `worker` | BullMQ worker, a daemon built from `Dockerfile.worker` | No HTTP |
+
+`web` has one binding to `api`, which injects `MATCH_CUT_API_URL` at runtime; the proxy adds the
+project's `DEV_API_TOKEN`. To use it, import the repo with **Root Directory** left at the repo root
+(not `apps/web`), and set the same variables as the Railway API in step 2 as project variables.
+Postgres and Redis still come from outside Vercel: use public connection URLs (Railway's
+`DATABASE_PUBLIC_URL` and `REDIS_PUBLIC_URL`, or Marketplace stores), and keep Redis on `noeviction`.
+`Dockerfile.worker` matches `Dockerfile` except for `APP=worker`; change both together.
+
+Not yet tried end to end: whether the container runtime sets `PORT` (the API reads it in
+production) and whether daemons are on your plan. A project with Root Directory `apps/web` ignores
+this file and works as in step 3.
+
 ## 4. After deploying
 
 - Open the site, paste a link, and run one brief end to end.
