@@ -1,0 +1,23 @@
+{
+  "name": "@match-cut/infra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@match-cut/core": "workspace:*",
+    "bullmq": "^5.56.0",
+    "drizzle-orm": "^0.44.2",
+    "ioredis": "^5.6.1",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.4"
+  }
+}

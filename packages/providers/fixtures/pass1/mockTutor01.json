@@ -1,0 +1,58 @@
+{
+  "summary": "An 8-minute screen-recording tutorial with a small face-cam bubble. It works because every step is zoomed into and called out, so viewers never hunt for the cursor.",
+  "video_type": "tutorial",
+  "format": {
+    "aspect_ratio": "16:9",
+    "duration": "08:00",
+    "avg_shot_length_seconds": 6.5
+  },
+  "hook": "Shows the finished result for 3 seconds before any explanation, with a title overlay naming the outcome.",
+  "beats": [
+    {
+      "start": "00:00",
+      "end": "00:08",
+      "label": "Result first",
+      "what_happens": "Finished result on screen with a title overlay."
+    },
+    {
+      "start": "00:08",
+      "end": "01:30",
+      "label": "Setup",
+      "what_happens": "Opens the app; cursor highlighted, 150% zoom on each menu click."
+    },
+    {
+      "start": "01:30",
+      "end": "04:00",
+      "label": "Steps one to three",
+      "what_happens": "Three numbered steps, each with a callout box and a zoom-in."
+    },
+    {
+      "start": "04:00",
+      "end": "06:30",
+      "label": "Steps four and five",
+      "what_happens": "Two more numbered steps with callouts; typing pauses sped up 2x."
+    },
+    {
+      "start": "06:30",
+      "end": "08:00",
+      "label": "Recap and outro",
+      "what_happens": "Face-cam goes full screen for a recap; end screen with two video cards."
+    }
+  ],
+  "style": {
+    "pacing": "Calm; shots average 6.5 s. Pauses while typing are sped up 2x rather than cut.",
+    "framing": "Full-frame screen recording with a circular face-cam bottom right. Zooms of 150 to 200% on every click target.",
+    "transitions": "Smooth zoom transitions between steps; hard cuts elsewhere.",
+    "text_and_graphics": "Numbered step titles top left, yellow callout boxes around buttons, cursor highlight ring.",
+    "audio": "Clear voiceover, no music under instructions, soft click sound effects.",
+    "delivery": "Calm, measured voice at about 140 words per minute; face-cam shows steady eye contact.",
+    "look": "Dark-mode app UI, neutral face-cam lighting, no color grade."
+  },
+  "signals": {
+    "has_speech": true,
+    "has_on_camera_person": true,
+    "has_music": false,
+    "has_on_screen_text": true
+  },
+  "spoken_lines_internal": ["Let me show you the end result first."]
+}

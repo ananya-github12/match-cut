@@ -1,0 +1,35 @@
+# Runs the production image locally against the dev Postgres and Redis, to check a deploy works:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d --wait
+# Mock mode, its own Redis namespace and port, so it doesn't touch dev data.
+x-app: &app
+  build: .
+  image: match-cut:local
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  environment: &env
+    NODE_ENV: production
+    PROVIDER: mock
+    DATABASE_URL: postgres://matchcut:matchcut@postgres:5432/matchcut
+    REDIS_URL: redis://redis:6379
+    REDIS_NAMESPACE: mc-prodcheck
+    DEV_API_TOKEN: prodcheck-token
+    # Test-only key for this local check. Generate a real one for any deployment.
+    GOAL_ENCRYPTION_KEY: cHJvZGNoZWNrLWxvY2FsLW9ubHktbm90LXNlY3JldCE=
+    MOCK_WATCH_DELAY_MS: "500"
+    MOCK_WRITE_DELAY_MS: "300"
+
+services:
+  api:
+    <<: *app
+    environment:
+      <<: *env
+      APP: api
+      PORT: "4000"
+    ports:
+      - "4200:4000"
+  worker:
+    <<: *app
+    environment:
+      <<: *env
+      APP: worker

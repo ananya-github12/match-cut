@@ -1,0 +1,40 @@
+{
+  "_note": "PLACEHOLDER owned by Match Cut, not Cardboard. Replace with Cardboard's real capability manifest before launch.",
+  "manifest_version": "0-placeholder",
+  "operations": [
+    { "id": "cut", "description": "Cut footage into shots" },
+    { "id": "trim", "description": "Trim the start or end of a clip" },
+    { "id": "reorder", "description": "Reorder clips on the timeline" },
+    { "id": "remove_silences", "description": "Remove silent gaps and dead air" },
+    {
+      "id": "captions",
+      "description": "Add captions",
+      "options": [
+        "font",
+        "size",
+        "position",
+        "words_per_line",
+        "highlight_active_word",
+        "animation"
+      ]
+    },
+    { "id": "titles", "description": "Add title text and text overlays" },
+    {
+      "id": "transitions",
+      "description": "Add transitions between clips",
+      "options": ["cut", "crossfade", "whip", "zoom"]
+    },
+    {
+      "id": "zoom_and_reframe",
+      "description": "Punch-in zooms and reframing to a new aspect ratio"
+    },
+    { "id": "lut", "description": "Apply a color LUT or grade" },
+    {
+      "id": "music_generation",
+      "description": "Generate background music by genre, tempo and energy"
+    },
+    { "id": "sound_effects", "description": "Add sound effects" },
+    { "id": "voiceover", "description": "Generate a voiceover" },
+    { "id": "generated_broll", "description": "Generate b-roll footage" }
+  ]
+}

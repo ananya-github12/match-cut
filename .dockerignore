@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+.git
+.env
+.env.*
+!.env.example
+docs
+evals
+tests
+apps/web
+**/test-results
+**/playwright-report
+**/*.test.ts
+**/*.int.test.ts
+packages/providers/fixtures/recordings

@@ -1,0 +1,28 @@
+{
+  "name": "@match-cut/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.1",
+    "@match-cut/core": "workspace:*",
+    "@match-cut/providers": "workspace:*",
+    "fastify": "^5.4.0",
+    "ioredis": "^5.6.1",
+    "postgres": "^3.4.7",
+    "@match-cut/infra": "workspace:*",
+    "bullmq": "^5.56.0",
+    "@google/genai": "2.32.0",
+    "@match-cut/worker": "workspace:*",
+    "tsx": "^4.20.0"
+  },
+  "exports": {
+    "./app": "./src/app.ts",
+    "./testing": "./src/testing.ts"
+  }
+}

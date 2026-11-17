@@ -1,0 +1,36 @@
+{
+  "set": "smoke",
+  "createdAt": "2026-11-17T15:30:12.403Z",
+  "versions": {
+    "pass1": "p1.v1",
+    "pass2": "p2.v1",
+    "schema": "s1",
+    "manifest": "0-placeholder"
+  },
+  "models": {
+    "standard": "mock-flash",
+    "deep": "mock-pro",
+    "pass2": "mock-flash"
+  },
+  "criteria": {
+    "accuracy": {
+      "passRate": 1,
+      "aggregate": 0
+    },
+    "specificity": {
+      "passRate": 0.6666666666666666
+    },
+    "executability": {
+      "passRate": 1
+    },
+    "adaptation": {
+      "passRate": 1
+    },
+    "originality": {
+      "passRate": 1
+    },
+    "honesty": {
+      "passRate": 1
+    }
+  }
+}

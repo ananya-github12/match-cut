@@ -1,0 +1,16 @@
+{
+  "written_by": "derived from mock fixture (test-only)",
+  "written_at": "2026-11-17",
+  "facts": [
+    "No speech; cut to music",
+    "Shots average about 1.2 seconds and cut on the beat",
+    "Upbeat cinematic electronic music at about 120 BPM",
+    "Teal-and-orange grade",
+    "Ends with a location title that fades in"
+  ],
+  "has_speech": false,
+  "has_music": true,
+  "has_on_camera_person": false,
+  "aspect_ratio": "16:9",
+  "brand_terms": []
+}

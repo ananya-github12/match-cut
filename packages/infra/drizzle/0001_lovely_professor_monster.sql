@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "briefs_updated_at_idx" ON "briefs" USING btree ("updated_at");

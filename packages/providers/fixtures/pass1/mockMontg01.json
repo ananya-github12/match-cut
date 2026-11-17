@@ -1,0 +1,42 @@
+{
+  "summary": "A 50-second travel montage cut to music with no speech. It works because cuts land on every beat and the shots grow wider as the music builds.",
+  "video_type": "montage",
+  "format": { "aspect_ratio": "16:9", "duration": "00:50", "avg_shot_length_seconds": 1.2 },
+  "hook": "A fast three-shot sequence on the first three drum hits, ending on a wide drone reveal.",
+  "beats": [
+    {
+      "start": "00:00",
+      "end": "00:08",
+      "label": "Drum-hit opener",
+      "what_happens": "Three close-ups cut on drum hits, then a drone reveal."
+    },
+    {
+      "start": "00:08",
+      "end": "00:30",
+      "label": "Journey build",
+      "what_happens": "Cuts every beat; speed ramps on movement."
+    },
+    {
+      "start": "00:30",
+      "end": "00:50",
+      "label": "Wide finale",
+      "what_happens": "Long wide shots slow down with the music; fade to title."
+    }
+  ],
+  "style": {
+    "pacing": "Shots average 1.2 s and cut on every beat at about 120 BPM; slows to 3 to 4 s shots in the last 20 seconds.",
+    "framing": "Mix of handheld close-ups and drone wides; speed ramps on motion.",
+    "transitions": "Hard cuts on beats, two whip pans, a final fade.",
+    "text_and_graphics": "A single location title at the end, thin white serif, fades in.",
+    "audio": "Upbeat cinematic electronic at about 120 BPM, building energy; whooshes on whip pans.",
+    "delivery": "not applicable",
+    "look": "Teal-and-orange grade, golden-hour light, high contrast."
+  },
+  "signals": {
+    "has_speech": false,
+    "has_on_camera_person": false,
+    "has_music": true,
+    "has_on_screen_text": true
+  },
+  "spoken_lines_internal": []
+}

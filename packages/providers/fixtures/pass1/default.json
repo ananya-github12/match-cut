@@ -1,0 +1,57 @@
+{
+  "summary": "A 45-second talking-head Short that teaches one productivity tip straight to camera. It works because the payoff is promised in the first second and every 2 to 3 seconds something changes on screen.",
+  "video_type": "talking-head short",
+  "format": { "aspect_ratio": "9:16", "duration": "00:45", "avg_shot_length_seconds": 2.4 },
+  "hook": "Opens mid-sentence on a tight close-up with a bold on-screen question, then a 115% punch-in on the first spoken word. No intro or logo, so the viewer is in the content within 1 second.",
+  "beats": [
+    {
+      "start": "00:00",
+      "end": "00:03",
+      "label": "Question hook",
+      "what_happens": "Close-up, bold caption asks the question the video answers."
+    },
+    {
+      "start": "00:03",
+      "end": "00:12",
+      "label": "Problem setup",
+      "what_happens": "Creator explains the common mistake; two jump cuts and one punch-in."
+    },
+    {
+      "start": "00:12",
+      "end": "00:30",
+      "label": "Three-step tip",
+      "what_happens": "Each step gets a numbered title card overlay and a screen-recording insert of about 3 seconds."
+    },
+    {
+      "start": "00:30",
+      "end": "00:40",
+      "label": "Proof moment",
+      "what_happens": "Before and after split screen with a whoosh sound effect."
+    },
+    {
+      "start": "00:40",
+      "end": "00:45",
+      "label": "Call to action",
+      "what_happens": "Creator points down at the caption; music swells and cuts hard to black."
+    }
+  ],
+  "style": {
+    "pacing": "Average shot about 2.4 s; jump cuts remove every pause over 0.3 s. Cuts land on music beats in the last 10 seconds.",
+    "framing": "Medium close-up at eye level, alternating with 110 to 120% punch-ins every second or third cut. Screen recordings fill the full frame.",
+    "transitions": "Hard cuts throughout, one whip pan into the proof section.",
+    "text_and_graphics": "Word-by-word captions, 2 to 4 words per line, white bold sans-serif with a yellow highlight on the active word, placed in the lower third. Numbered title cards for each step.",
+    "audio": "Low-volume lo-fi hip-hop at about 90 BPM under the voice; whoosh on transitions, a pop on each title card.",
+    "delivery": "High energy, fast speech at roughly 180 words per minute, direct eye contact, frequent hand gestures toward the captions.",
+    "look": "Bright, evenly lit home office, warm color grade, plant and bookshelf in the background, casual hoodie."
+  },
+  "signals": {
+    "has_speech": true,
+    "has_on_camera_person": true,
+    "has_music": true,
+    "has_on_screen_text": true
+  },
+  "spoken_lines_internal": [
+    "Stop doing this one thing every morning.",
+    "Here are three steps that changed my week."
+  ]
+}

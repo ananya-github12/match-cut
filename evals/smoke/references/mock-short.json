@@ -1,0 +1,17 @@
+{
+  "written_by": "derived from mock fixture (test-only)",
+  "written_at": "2026-11-17",
+  "facts": [
+    "Opens on a tight close-up with a bold on-screen question",
+    "Average shot length is about 2.4 seconds",
+    "Word-by-word captions, 2 to 4 words per line, in the lower third",
+    "Lo-fi hip-hop at about 90 BPM under the voice",
+    "One person talks to camera with high energy",
+    "Hard cuts throughout, with one whip pan"
+  ],
+  "has_speech": true,
+  "has_music": true,
+  "has_on_camera_person": true,
+  "aspect_ratio": "9:16",
+  "brand_terms": ["Stop doing this one thing every morning"]
+}

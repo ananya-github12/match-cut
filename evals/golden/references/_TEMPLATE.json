@@ -1,0 +1,21 @@
+{
+  "_how_to": "Copy to <case id>.json, watch the video (or its clip range), and write what you see and hear. Facts are short, checkable statements. A breakdown that contradicts a fact counts as a wrong observation. Leave out anything you aren't sure of. Set written_by and written_at; a case is only scored once both are filled.",
+  "written_by": "",
+  "written_at": "",
+  "facts": [
+    "Opens with ... in the first 2 seconds",
+    "Average shot length is about ... seconds",
+    "Captions are ..., about ... words per line",
+    "Music is ... at roughly ... BPM / no music",
+    "The person on camera ... / no person on camera",
+    "Transitions are ..."
+  ],
+  "has_speech": true,
+  "has_music": true,
+  "has_on_camera_person": true,
+  "aspect_ratio": "9:16",
+  "brand_terms": [
+    "Names, brands, channel names or catchphrases from the video that must not appear in the prompt"
+  ],
+  "notes": ""
+}

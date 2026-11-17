@@ -1,0 +1,16 @@
+{
+  "name": "@match-cut/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@google/genai": "2.32.0",
+    "@match-cut/core": "workspace:*"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@match-cut/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@match-cut/core": "workspace:*",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.6.1",
+    "@match-cut/infra": "workspace:*",
+    "@match-cut/providers": "workspace:*",
+    "@google/genai": "2.32.0",
+    "tsx": "^4.20.0"
+  },
+  "exports": {
+    "./pipeline": "./src/pipeline.ts",
+    "./setup": "./src/setup.ts",
+    "./pass1": "./src/pass1.ts",
+    "./pass2": "./src/pass2.ts"
+  }
+}

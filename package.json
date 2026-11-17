@@ -1,0 +1,41 @@
+{
+  "name": "match-cut",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "dev": "corepack pnpm --parallel --filter \"./apps/*\" dev",
+    "build": "corepack pnpm -r build",
+    "typecheck": "corepack pnpm -r typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "services:up": "docker compose up -d",
+    "services:down": "docker compose down",
+    "ci": "sh scripts/ci.sh",
+    "test:int": "vitest run --config vitest.int.config.ts",
+    "record:fixtures": "corepack pnpm --filter @match-cut/worker exec tsx scripts/record-fixtures.ts",
+    "check:setup": "corepack pnpm --filter @match-cut/worker exec tsx scripts/check-setup.ts",
+    "test:e2e": "corepack pnpm --filter @match-cut/web e2e",
+    "eval": "corepack pnpm --filter @match-cut/evals eval",
+    "ops:report": "corepack pnpm --filter @match-cut/worker exec tsx scripts/ops-report.ts",
+    "local": "docker compose up -d --wait && corepack pnpm dev",
+    "local:hybrid": "docker compose up -d --wait && PROVIDER=mock VIDEO_LOOKUP=youtube corepack pnpm dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@types/node": "^22.15.0",
+    "eslint": "^9.30.0",
+    "globals": "^16.2.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.4"
+  }
+}

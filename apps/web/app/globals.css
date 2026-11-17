@@ -1,0 +1,86 @@
+/* Tokens. Cardboard's real design system would replace these; contrast is >= 4.5:1 in both themes. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #efefec;
+  --border: #dcdcd6;
+  --fg: #17171a;
+  --muted: #55555e;
+  --accent: #3b37d6;
+  --accent-fg: #ffffff;
+  --accent-soft: #e9e8fb;
+  --danger: #b4231b;
+  --danger-soft: #fbeceb;
+  --note: #6b4e00;
+  --note-soft: #fdf4dc;
+  --ok: #1d6b3a;
+  --focus: #3b37d6;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 16px rgb(0 0 0 / 6%);
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111114;
+    --surface: #1a1a1f;
+    --surface-2: #24242b;
+    --border: #34343d;
+    --fg: #f1f1f4;
+    --muted: #a9a9b4;
+    --accent: #8f8cff;
+    --accent-fg: #0f0f14;
+    --accent-soft: #2a2950;
+    --danger: #ff8a80;
+    --danger-soft: #3a1f1d;
+    --note: #f1cf6b;
+    --note-soft: #33290f;
+    --ok: #7fd59b;
+    --focus: #a6a3ff;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 30%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

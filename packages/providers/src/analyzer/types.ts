@@ -1,0 +1,91 @@
+import type {
+  AnalyzedRange,
+  Breakdown,
+  CapabilityManifest,
+  Detail,
+  TargetFormat,
+} from "@match-cut/core";
+
+import type { JobBudget } from "./budget.js";
+
+/** PRD finish-reason retries: RECITATION -> stricter no-quoting reminder; MAX_TOKENS -> be concise. */
+export type RetryHint = "no_quoting" | "be_concise";
+
+/** Per-call settings that ride alongside the input. */
+export interface CallContext {
+  /** Upper bound for this call; providers use the smaller of this and their stage budget. */
+  timeoutMs?: number;
+  hint?: RetryHint;
+  budget?: JobBudget;
+}
+
+export interface UpstreamFailure {
+  model: string;
+  code: string;
+  status?: number;
+  finishReason?: string;
+}
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface WatchInput {
+  videoId: string;
+  /** Always canonicalYouTubeUrl(videoId); never the user's raw URL. */
+  canonicalUrl: string;
+  range: AnalyzedRange | null;
+  detail: Detail;
+  model: string;
+  /** Full video length from the precheck; null if the precheck was skipped. */
+  durationSeconds: number | null;
+}
+
+export interface RepairInput {
+  pass: 1 | 2;
+  /** The model's previous output, as text. */
+  previousOutput: string;
+  /** Plain-English list of failed checks. */
+  problems: string[];
+  model: string;
+}
+
+export interface WritePromptInput {
+  breakdown: Breakdown;
+  goal: string;
+  format: TargetFormat;
+  lengthSeconds: number | null;
+  language: string;
+  manifest: CapabilityManifest;
+  model: string;
+}
+
+/** Raw model output; the pipeline validates and, once, repairs it. */
+export interface ModelResult {
+  /** Parsed JSON, or undefined when the response wasn't valid JSON. */
+  output: unknown;
+  /** The response text as returned, for repair calls and recordings. */
+  text?: string;
+  /** Exact model version the API reports, e.g. "gemini-3.8-flash-001". */
+  modelVersion?: string;
+  /** Upstream attempts this result took, and whether a fallback model produced it. */
+  attempts?: number;
+  fallbackUsed?: boolean;
+  /** Failed attempts before this result (retries, fallbacks). */
+  upstreamFailures?: UpstreamFailure[];
+  model: string;
+  usage: Usage;
+}
+
+/** The provider adapter around the video model (PRD: "a thin provider adapter around Gemini"). */
+export interface VideoAnalyzer {
+  watch(input: WatchInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult>;
+  writePrompt(
+    input: WritePromptInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult>;
+  /** One text-only repair call: fix the listed problems without re-watching. */
+  repair(input: RepairInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult>;
+}

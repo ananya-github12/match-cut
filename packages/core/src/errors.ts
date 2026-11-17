@@ -1,0 +1,160 @@
+/**
+ * Error and warning codes, HTTP statuses and user-facing copy.
+ * Source: PRD "Backend: API contract" (error codes) and
+ * "Frontend requirements > Error, warning and empty-state copy". Copy must match the PRD exactly.
+ */
+
+export const ERRORS = {
+  INVALID_URL: { http: 400, retryable: false, message: "That doesn't look like a YouTube link." },
+  UNSUPPORTED_SOURCE: {
+    http: 400,
+    retryable: false,
+    message: "Match Cut works with single YouTube videos for now. Instagram and TikTok are coming.",
+  },
+  INVALID_CLIP_RANGE: {
+    http: 400,
+    retryable: false,
+    message: "The end time needs to be at least 3 seconds after the start, within 10 minutes.",
+  },
+  GOAL_TOO_LONG: {
+    http: 400,
+    retryable: false,
+    message: "Keep the description under 1,500 characters.",
+  },
+  UNAUTHORIZED: { http: 401, retryable: false, message: "Your session has ended." },
+  VIDEO_NOT_FOUND: {
+    http: 404,
+    retryable: false,
+    message: "This video has been removed or the link is wrong.",
+  },
+  VIDEO_NOT_PUBLIC: {
+    http: 422,
+    retryable: false,
+    message: "This video is private or unlisted. Match Cut can only watch public videos.",
+  },
+  VIDEO_RESTRICTED: {
+    http: 422,
+    retryable: false,
+    message: "This video is age-restricted or blocked in our region.",
+  },
+  // PRD lists retryable as "Later"; the API field is boolean, so false + a message saying when.
+  LIVE_NOT_SUPPORTED: {
+    http: 422,
+    retryable: false,
+    message: "This video is live or hasn't premiered yet. Try again once it has ended.",
+  },
+  VIDEO_TOO_LONG: {
+    http: 422,
+    retryable: false,
+    message: "This video is over 20 minutes. Pick the part you want, up to 10 minutes.",
+  },
+  NO_ANALYZABLE_CONTENT: {
+    http: 422,
+    retryable: false,
+    message: "There isn't enough in this video to study. It may be too short or blank.",
+  },
+  CONTENT_BLOCKED: { http: 422, retryable: false, message: "This video can't be analyzed." },
+  RATE_LIMITED: {
+    http: 429,
+    retryable: true,
+    message: "You've reached the limit for now. You can match another video in {minutes} minutes.",
+  },
+  UPSTREAM_ERROR: {
+    http: 502,
+    retryable: true,
+    message: "Something went wrong while analyzing.",
+  },
+  INVALID_MODEL_OUTPUT: {
+    http: 502,
+    retryable: true,
+    message: "Something went wrong while analyzing.",
+  },
+  CAPACITY_EXHAUSTED: {
+    http: 503,
+    retryable: true,
+    message: "Match Cut is at capacity. Try again in a few minutes.",
+  },
+  UPSTREAM_TIMEOUT: {
+    http: 504,
+    retryable: true,
+    message: "This took too long. Shorter sections work faster.",
+  },
+  INTERNAL: { http: 500, retryable: true, message: "Something went wrong while analyzing." },
+
+  // ---- Not in the PRD's error table; added in M2, pending sign-off. ----
+  /** Request body fails validation in a way no PRD code covers (bad format, length, language). */
+  INVALID_REQUEST: {
+    http: 400,
+    retryable: false,
+    message: "Something in the request isn't valid.",
+  },
+  /** Unknown brief ID, or one owned by another user. */
+  BRIEF_NOT_FOUND: {
+    http: 404,
+    retryable: false,
+    message: "This brief doesn't exist or was deleted.",
+  },
+  /** Regenerate called while the brief is still running, or before it has a breakdown. */
+  BRIEF_NOT_READY: {
+    http: 409,
+    retryable: true,
+    message: "This brief is still being worked on. Try again when it finishes.",
+  },
+} as const satisfies Record<string, { http: number; retryable: boolean; message: string }>;
+
+export type ErrorCode = keyof typeof ERRORS;
+
+export const WARNINGS = {
+  CLIP_CLAMPED: "Your end time was past the end of the video, so we analyzed up to {duration}.",
+  TIMESTAMP_IGNORED: "The link's start time was ignored. Set a clip range to analyze one part.",
+  NO_SPEECH: "No speech found, so the prompt focuses on pacing, music and graphics.",
+  LOW_VISUAL_SIGNAL:
+    "The video is mostly a still picture, so there was little visual style to copy.",
+  EMBED_DISABLED: "The creator has turned off playback outside YouTube.",
+} as const;
+
+export type WarningCode = keyof typeof WARNINGS;
+
+export interface ApiError {
+  code: ErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface Warning {
+  code: WarningCode;
+  message: string;
+}
+
+function fill(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m));
+}
+
+export function apiError(code: ErrorCode, vars: Record<string, string | number> = {}): ApiError {
+  const e = ERRORS[code];
+  return { code, message: fill(e.message, vars), retryable: e.retryable };
+}
+
+export function warning(code: WarningCode, vars: Record<string, string | number> = {}): Warning {
+  return { code, message: fill(WARNINGS[code], vars) };
+}
+
+/** Thrown inside the backend; routes turn it into `{ error }` with the mapped HTTP status. */
+export class MatchCutError extends Error {
+  readonly error: ApiError;
+  readonly http: number;
+  /** Internal debugging detail (upstream status, finish reason). Logged, never sent to users. */
+  readonly detail?: Record<string, unknown>;
+  constructor(
+    code: ErrorCode,
+    vars: Record<string, string | number> = {},
+    detail?: Record<string, unknown>,
+  ) {
+    const e = apiError(code, vars);
+    super(e.message);
+    this.name = "MatchCutError";
+    this.error = e;
+    this.http = ERRORS[code].http;
+    this.detail = detail;
+  }
+}

@@ -1,0 +1,5 @@
+docs/
+pnpm-lock.yaml
+**/.next/
+**/next-env.d.ts
+CLAUDE.md

@@ -1,0 +1,18 @@
+{
+  "_note": "USD per 1M tokens, Gemini paid Standard tier. From ai.google.dev/gemini-api/docs/pricing, checked 2026-11-17. Video input is priced as input tokens. Update when prices change; the spend cap uses these.",
+  "checked": "2026-11-17",
+  "models": {
+    "gemini-3.8-flash": { "input": 0.75, "output": 3.75 },
+    "gemini-3.6-flash": {
+      "input": 0.75,
+      "output": 3.75,
+      "_note": "not checked; assumed same as 3.8 Flash"
+    },
+    "gemini-3.5-flash-lite": { "input": 0.3, "output": 2.5 },
+    "gemini-4-carbon": { "input": 2.0, "output": 10.0 },
+    "mock-flash": { "input": 0.75, "output": 3.75 },
+    "mock-pro": { "input": 2.0, "output": 10.0 },
+    "mock-fallback": { "input": 0.3, "output": 2.5 }
+  },
+  "default": { "input": 2.0, "output": 10.0 }
+}

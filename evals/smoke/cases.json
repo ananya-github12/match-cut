@@ -1,0 +1,33 @@
+{
+  "_about": "TEST-ONLY smoke set for the eval runner itself, in mock mode. References are derived from the mock fixtures, not written by a person, so these scores say nothing about model quality.",
+  "target_size": 3,
+  "cases": [
+    {
+      "id": "mock-short",
+      "url": "mockShort01",
+      "category": "talking-head short",
+      "goal": "A 30-second launch video for my budgeting app",
+      "target": { "format": "9:16", "length_seconds": 30 },
+      "language": "en",
+      "status": "ready"
+    },
+    {
+      "id": "mock-tutorial",
+      "url": "mockTutor01",
+      "category": "tutorial",
+      "goal": "A 60-second vertical tutorial for our app's setup",
+      "target": { "format": "9:16", "length_seconds": 60 },
+      "language": "en",
+      "status": "ready"
+    },
+    {
+      "id": "mock-montage",
+      "url": "mockMontg01",
+      "category": "music-led montage",
+      "goal": "A product montage for our year in review",
+      "target": { "format": "1:1", "length_seconds": 30 },
+      "language": "en",
+      "status": "ready"
+    }
+  ]
+}

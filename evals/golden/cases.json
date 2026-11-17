@@ -1,0 +1,98 @@
+{
+  "_about": "Golden set (PRD: 50 public videos across video types, each with a human-written reference). v1 starts with 10 slots. A case runs once status is 'ready': its reference file exists and a person wrote it. Add cases by appending; never edit a case's inputs once it has a baseline score.",
+  "target_size": 50,
+  "cases": [
+    {
+      "id": "travel-vlog-short",
+      "url": "https://youtube.com/shorts/SU1QGhP-pkI",
+      "category": "vlog",
+      "goal": "A 30-second recap of a weekend in my city for my travel page",
+      "target": { "format": "9:16", "length_seconds": 30 },
+      "language": "en",
+      "status": "needs_reference"
+    },
+    {
+      "id": "screen-recorder-tutorial",
+      "url": "https://www.youtube.com/watch?v=AxpQh2AlaPI",
+      "clip": { "start_seconds": 261, "end_seconds": 327 },
+      "category": "tutorial",
+      "goal": "A 60-second tutorial showing how to set up our app's first project",
+      "target": { "format": "16:9", "length_seconds": 60 },
+      "language": "en",
+      "status": "needs_reference"
+    },
+    {
+      "id": "saas-launch-demo",
+      "url": "https://youtube.com/shorts/5jly-UeJcDw",
+      "category": "product demo",
+      "goal": "A launch video for our budgeting app's new shared-wallet feature",
+      "target": { "format": "9:16", "length_seconds": 30 },
+      "language": "en",
+      "status": "needs_reference"
+    },
+    {
+      "id": "food-short",
+      "url": "https://youtube.com/shorts/VO8j3WJwoJk",
+      "category": "music-led montage",
+      "goal": "A 20-second short showing how I make my weekend pancakes",
+      "target": { "format": "9:16", "length_seconds": 15 },
+      "language": "en",
+      "status": "needs_reference"
+    },
+    {
+      "id": "talking-head-commentary",
+      "url": "https://youtube.com/shorts/k4vSWTSOoAk",
+      "category": "talking-head short",
+      "goal": "A short explaining why most budgeting apps fail first-time users",
+      "target": { "format": "9:16", "length_seconds": 30 },
+      "language": "en",
+      "status": "needs_reference"
+    },
+    {
+      "id": "podcast-static",
+      "url": null,
+      "category": "podcast with static picture",
+      "goal": "A 45-second clip from my podcast episode on saving habits",
+      "target": { "format": "9:16", "length_seconds": 60 },
+      "language": "en",
+      "status": "needs_video"
+    },
+    {
+      "id": "non-english-hindi",
+      "url": null,
+      "category": "non-English",
+      "goal": "A short in Hindi about splitting rent with roommates",
+      "target": { "format": "9:16", "length_seconds": 30 },
+      "language": "hi",
+      "status": "needs_video"
+    },
+    {
+      "id": "long-with-clip",
+      "url": null,
+      "clip": null,
+      "category": "long video with clip range",
+      "goal": "A 60-second highlight from my webinar",
+      "target": { "format": "16:9", "length_seconds": 60 },
+      "language": "en",
+      "status": "needs_video"
+    },
+    {
+      "id": "music-montage-no-speech",
+      "url": null,
+      "category": "music-led montage",
+      "goal": "A product montage for our app's year in review",
+      "target": { "format": "1:1", "length_seconds": 30 },
+      "language": "en",
+      "status": "needs_video"
+    },
+    {
+      "id": "format-change-16-to-9",
+      "url": null,
+      "category": "talking-head (16:9 to 9:16 reframing)",
+      "goal": "A vertical cut of my YouTube explainer for Reels",
+      "target": { "format": "9:16", "length_seconds": 45 },
+      "language": "en",
+      "status": "needs_video"
+    }
+  ]
+}

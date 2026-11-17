@@ -1,0 +1,16 @@
+{
+  "written_by": "derived from mock fixture (test-only)",
+  "written_at": "2026-11-17",
+  "facts": [
+    "Shows the finished result before explaining",
+    "Full-frame screen recording with a circular face-cam bottom right",
+    "Zooms of 150 to 200% on click targets",
+    "No music under the instructions",
+    "Five numbered steps with callout boxes"
+  ],
+  "has_speech": true,
+  "has_music": false,
+  "has_on_camera_person": true,
+  "aspect_ratio": "16:9",
+  "brand_terms": []
+}

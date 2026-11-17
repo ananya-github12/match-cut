@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "tests"
+  - "evals"
+
+# Packages allowed to run install scripts (native binaries).
+allowBuilds:
+  "@google/genai": false
+  esbuild: true
+  msgpackr-extract: true
+  protobufjs: false
