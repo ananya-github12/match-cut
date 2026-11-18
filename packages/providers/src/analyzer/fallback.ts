@@ -6,7 +6,7 @@
  *   RECITATION                        retry once on the same model with a no-quoting reminder
  *   MAX_TOKENS                        retry once on the same model with a higher cap, "be concise"
  *   timeout                           retry only if at least 30 s of the job budget remain
- *   with skipSameModelOnOverload      503 and 429 skip straight to the next model
+ *   with skipSameModelOnOverload      503, 504 and 429 skip straight to the next model
  *   blocked, client errors, billing   no retry
  * Every failed attempt spends the job budget; when it runs out the last error is returned.
  */
@@ -34,7 +34,7 @@ export interface FallbackOptions {
   /** PRD: no timeout retry when less than this remains. */
   minRemainingForTimeoutRetryMs?: number;
   /**
-   * On "model overloaded" (503) or rate limits (429), move straight to the next model in the
+   * On "model overloaded" (503, 504) or rate limits (429), move straight to the next model in the
    * plan instead of retrying the same one: an overloaded model rarely recovers within seconds.
    * Default false (the PRD's retry-once rule).
    */
@@ -197,7 +197,9 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
         if (!timeoutRetry && !isRetryable(err)) throw giveUp(err);
         if (budget && !budget.fail()) throw giveUp(err);
         i++;
-        const overload = err.detail?.status === 503 || err.error.code === "CAPACITY_EXHAUSTED";
+        const status = err.detail?.status;
+        const overload =
+          status === 503 || status === 504 || err.error.code === "CAPACITY_EXHAUSTED";
         if (opts.skipSameModelOnOverload && overload) {
           // Jump past further tries of this model, but only if another model is left.
           let j = i;

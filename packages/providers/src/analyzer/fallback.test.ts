@@ -206,6 +206,13 @@ describe("withFallback when a model is overloaded (incident 2026-11-18)", () => 
     expect(r).toMatchObject({ model: "lite", fallbackUsed: true });
   });
 
+  it("a 504 from an overloaded model also goes straight to the next model", async () => {
+    const gatewayTimeout = () => new MatchCutError("UPSTREAM_ERROR", {}, { status: 504 });
+    const { inner, calls } = scripted([gatewayTimeout(), "ok"]);
+    await withFallback(inner, fallbackOpts).watch(input);
+    expect(calls).toEqual(["flash", "lite"]);
+  });
+
   it("a 500 still retries the same model once", async () => {
     const serverError = () => new MatchCutError("UPSTREAM_ERROR", {}, { status: 500 });
     const { inner, calls } = scripted([serverError(), "ok"]);
