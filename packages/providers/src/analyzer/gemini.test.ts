@@ -13,7 +13,12 @@ import {
 } from "@match-cut/core";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { buildPass1Request, GeminiAnalyzer, readResponse } from "./gemini.js";
+import {
+  buildPass1Request,
+  GeminiAnalyzer,
+  pass1AttemptTimeoutMs,
+  readResponse,
+} from "./gemini.js";
 import type { WatchInput } from "./types.js";
 
 const ID = "dQw4w9WgXcQ";
@@ -263,5 +268,18 @@ describe("GeminiAnalyzer", () => {
     expect(sent.config?.systemInstruction).toBe(PASS2_SYSTEM_INSTRUCTION);
     expect(sent.config?.responseJsonSchema).toBe(PASS2_RESPONSE_SCHEMA);
     expect(part(sent)[0]!.text).toContain("- too short");
+  });
+});
+
+describe("pass1AttemptTimeoutMs", () => {
+  it("scales with the analyzed length, between 45 s and the 180 s stage budget", () => {
+    expect(pass1AttemptTimeoutMs(input({ durationSeconds: 5 }))).toBe(45_000);
+    expect(pass1AttemptTimeoutMs(input({ durationSeconds: 19 }))).toBe(58_500);
+    expect(pass1AttemptTimeoutMs(input({ durationSeconds: 600 }))).toBe(180_000);
+    expect(pass1AttemptTimeoutMs(input({ durationSeconds: null }))).toBe(180_000);
+  });
+  it("uses the clip length when a range is set", () => {
+    const clip = input({ durationSeconds: 1200, range: { start_seconds: 0, end_seconds: 20 } });
+    expect(pass1AttemptTimeoutMs(clip)).toBe(60_000);
   });
 });

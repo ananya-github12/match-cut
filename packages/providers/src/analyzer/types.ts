@@ -17,6 +17,8 @@ export interface CallContext {
   timeoutMs?: number;
   hint?: RetryHint;
   budget?: JobBudget;
+  /** Job time this call must leave unused, for later stages (pass 1 leaves room for pass 2). */
+  reserveAfterMs?: number;
 }
 
 export interface UpstreamFailure {

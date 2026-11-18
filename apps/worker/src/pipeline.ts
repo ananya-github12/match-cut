@@ -72,6 +72,9 @@ export interface PipelineDeps {
 class Cancelled extends Error {}
 
 /** Errors that are ours, not the user's: PRD "failed jobs are not billed to user quotas". */
+/** Job time pass 1 leaves unused for pass 2 (one 20 s attempt plus a quick fallback). */
+export const PASS2_RESERVE_MS = 25_000;
+
 const UPSTREAM_CODES = new Set([
   "UPSTREAM_ERROR",
   "UPSTREAM_TIMEOUT",
@@ -187,7 +190,8 @@ export async function runJob(job: JobData, deps: PipelineDeps): Promise<void> {
             },
             analyzedSeconds,
             controller.signal,
-            { budget },
+            // Leave room in the job budget for pass 2, so a slow pass 1 doesn't starve it.
+            { budget, reserveAfterMs: PASS2_RESERVE_MS },
           ),
         );
         out = run.output;

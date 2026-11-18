@@ -1,8 +1,9 @@
 import { MatchCutError } from "@match-cut/core";
 import { describe, expect, it, vi } from "vitest";
+import { JobBudget } from "./budget.js";
 import { attemptPlan, isRetryable, withFallback } from "./fallback.js";
 import { MockAnalyzer } from "./mock.js";
-import type { ModelResult, VideoAnalyzer, WatchInput } from "./types.js";
+import type { CallContext, ModelResult, VideoAnalyzer, WatchInput } from "./types.js";
 
 const input: WatchInput = {
   videoId: "mockShort01",
@@ -180,5 +181,88 @@ describe("withFallback", () => {
       model: "flash",
     });
     expect(r).toMatchObject({ model: "flash-old", fallbackUsed: true });
+  });
+});
+
+describe("withFallback when a model is overloaded (incident 2026-11-18)", () => {
+  const fallbackOpts = {
+    fallbacks: ["lite"],
+    skipSameModelOnOverload: true,
+    fallbackReserveMs: 40_000,
+    minAttemptMs: 8_000,
+    ...noSleep,
+  };
+  /** A job budget on a fake clock that each call can move forward. */
+  function clock(timeoutMs = 240_000) {
+    let t = 0;
+    const budget = new JobBudget({ maxFailedAttempts: 4, timeoutMs, now: () => t });
+    return { budget, advance: (ms: number) => (t += ms) };
+  }
+
+  it("503 goes straight to the next model instead of retrying the same one", async () => {
+    const { inner, calls } = scripted([overloaded(), "ok"]);
+    const r = await withFallback(inner, fallbackOpts).watch(input);
+    expect(calls).toEqual(["flash", "lite"]);
+    expect(r).toMatchObject({ model: "lite", fallbackUsed: true });
+  });
+
+  it("a 500 still retries the same model once", async () => {
+    const serverError = () => new MatchCutError("UPSTREAM_ERROR", {}, { status: 500 });
+    const { inner, calls } = scripted([serverError(), "ok"]);
+    await withFallback(inner, fallbackOpts).watch(input);
+    expect(calls).toEqual(["flash", "flash"]);
+  });
+
+  it("with no other model left, a 503 still retries the same model", async () => {
+    const { inner, calls } = scripted([overloaded(), "ok"]);
+    await withFallback(inner, { ...fallbackOpts, fallbacks: [] }).watch(input);
+    expect(calls).toEqual(["flash", "flash"]);
+  });
+
+  it("caps an attempt so the fallback keeps its reserve, and the last model gets the rest", async () => {
+    const { budget } = clock(100_000);
+    const seen: number[] = [];
+    const inner = analyzerWith({
+      watch: vi.fn(async (i: WatchInput, _s?: AbortSignal, ctx?: CallContext) => {
+        seen.push(ctx!.timeoutMs!);
+        if (i.model === "flash") throw overloaded();
+        return ok(i.model);
+      }),
+    });
+    await withFallback(inner, fallbackOpts).watch(input, undefined, { budget });
+    expect(seen).toEqual([60_000, 100_000]);
+  });
+
+  it("leaves reserveAfterMs untouched for the next stage", async () => {
+    const { budget } = clock(100_000);
+    const seen: number[] = [];
+    const inner = analyzerWith({
+      watch: vi.fn(async (i: WatchInput, _s?: AbortSignal, ctx?: CallContext) => {
+        seen.push(ctx!.timeoutMs!);
+        return ok(i.model);
+      }),
+    });
+    await withFallback(inner, fallbackOpts).watch(input, undefined, {
+      budget,
+      reserveAfterMs: 25_000,
+    });
+    expect(seen).toEqual([35_000]); // 100 - 25 reserved for pass 2 - 40 kept for "lite"
+  });
+
+  it("doesn't start an attempt with too little time left", async () => {
+    const { budget, advance } = clock(50_000);
+    const calls: string[] = [];
+    const inner = analyzerWith({
+      watch: vi.fn(async (i: WatchInput) => {
+        calls.push(i.model);
+        advance(45_000); // the overloaded call hangs for most of the budget
+        throw overloaded();
+      }),
+    });
+    const err = await withFallback(inner, fallbackOpts)
+      .watch(input, undefined, { budget })
+      .catch((e: MatchCutError) => e);
+    expect(calls).toEqual(["flash"]); // 5 s left < 8 s minimum: "lite" is never called
+    expect((err as MatchCutError).error.code).toBe("UPSTREAM_TIMEOUT");
   });
 });

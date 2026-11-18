@@ -95,6 +95,17 @@ export function mediaResolution(input: WatchInput): MediaResolution | undefined 
   return s !== null && s > 600 ? MediaResolution.MEDIA_RESOLUTION_LOW : undefined;
 }
 
+/**
+ * How long one pass 1 attempt may wait, scaled to the analyzed length: 30 s plus 1.5 s per
+ * second of video, at least 45 s, never above the PRD's 180 s stage budget. A 20 s Short gets
+ * 60 s; anything over about 100 s gets the full 180 s. Unknown length: the full budget.
+ */
+export function pass1AttemptTimeoutMs(input: WatchInput, capMs = 180_000): number {
+  const s = sectionSeconds(input);
+  if (s === null) return capMs;
+  return Math.min(capMs, Math.max(45_000, 30_000 + 1_500 * s));
+}
+
 /** PRD finish-reason retries: extra instruction text, and a higher output cap for MAX_TOKENS. */
 export const HINT_TEXT: Record<RetryHint, string> = {
   no_quoting:
@@ -272,7 +283,10 @@ export class GeminiAnalyzer implements VideoAnalyzer {
       input,
       {
         thinkingLevel: this.thinkingLevel,
-        timeoutMs: Math.min(this.pass1TimeoutMs, ctx.timeoutMs ?? Infinity),
+        timeoutMs: Math.min(
+          pass1AttemptTimeoutMs(input, this.pass1TimeoutMs),
+          ctx.timeoutMs ?? Infinity,
+        ),
         hint: ctx.hint,
       },
       signal,

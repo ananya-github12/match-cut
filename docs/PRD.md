@@ -383,9 +383,11 @@ Each job gets a budget of 3 upstream attempts and 240 seconds of wall-clock time
 | Failure | How we detect it | Handling | User sees |
 | --- | --- | --- | --- |
 | Gemini 429, rate limit | HTTP status | Back off and retry twice; then requeue once if quota resets within 60 s | `CAPACITY_EXHAUSTED` if still failing |
-| Gemini 500 or 503, overloaded | HTTP status | Retry once, then switch to the fallback model | `UPSTREAM_ERROR` if both fail |
+| Gemini 500, server error | HTTP status | Retry once, then switch to the fallback model | `UPSTREAM_ERROR` if both fail |
+| Gemini 503, model overloaded | HTTP status | Switch to the next fallback model at once (retry the same model only if none is left) | `UPSTREAM_ERROR` if all fail |
 | Gemini can't access the video | Permission or not-found error text | No retry; re-run precheck to classify | `VIDEO_NOT_PUBLIC` or `VIDEO_NOT_FOUND` |
 | Request timeout | No response within the stage budget | Abort; no retry if under 30 s remain | `UPSTREAM_TIMEOUT` with a hint to set a clip range |
+| One slow attempt eats the job budget | Attempt time vs. what's left | Each pass 1 attempt waits 30 s + 1.5 s per second of video (45 to 180 s); while a fallback model is left, an attempt stops early enough to keep 40 s for it; pass 1 leaves 25 s for pass 2; no attempt starts with under 8 s left | Slower result instead of a failure |
 | Safety block | `finishReason: SAFETY` or `promptFeedback.blockReason` | No retry | `CONTENT_BLOCKED` |
 | Recitation block | `finishReason: RECITATION` | Retry once with a stricter no-quoting reminder | `INVALID_MODEL_OUTPUT` if repeated |
 | Output cut off | `finishReason: MAX_TOKENS` | Retry once with a higher cap and "be concise" | `INVALID_MODEL_OUTPUT` if repeated |

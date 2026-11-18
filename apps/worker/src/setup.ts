@@ -34,6 +34,11 @@ export function buildAnalyzer(env: Env, models: ModelNames): VideoAnalyzer {
     backoffMs: env.GEMINI_RETRY_BACKOFF_MS.split(",").map(Number),
     retrySameModel: env.GEMINI_RETRY_SAME_MODEL,
     maxAttempts: 1 + env.GEMINI_RETRY_SAME_MODEL + models.fallbacks.length,
+    // An overloaded model (503) rarely recovers within seconds: go straight to the next one,
+    // keep 40 s of the job for a fallback, and don't start an attempt with under 8 s left.
+    skipSameModelOnOverload: true,
+    fallbackReserveMs: 40_000,
+    minAttemptMs: 8_000,
     onAttempt: ({ model, attempt, error, hint }) => {
       if (error)
         console.warn(
