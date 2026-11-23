@@ -39,6 +39,8 @@ export function buildAnalyzer(env: Env, models: ModelNames): VideoAnalyzer {
     skipSameModelOnOverload: true,
     fallbackReserveMs: 40_000,
     minAttemptMs: 8_000,
+    // Every model busy at once (seen 2026-11-23): wait and go through the list again.
+    overloadRoundWaitsMs: [5_000, 15_000],
     onAttempt: ({ model, attempt, error, hint }) => {
       if (error)
         console.warn(

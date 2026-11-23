@@ -273,3 +273,61 @@ describe("withFallback when a model is overloaded (incident 2026-11-18)", () => 
     expect((err as MatchCutError).error.code).toBe("UPSTREAM_TIMEOUT");
   });
 });
+
+describe("withFallback when every model is overloaded (incident 2026-11-23)", () => {
+  const opts = {
+    fallbacks: ["lite"],
+    skipSameModelOnOverload: true,
+    fallbackReserveMs: 40_000,
+    minAttemptMs: 8_000,
+    overloadRoundWaitsMs: [5_000, 15_000],
+  };
+  const budgetOf = (timeoutMs: number) =>
+    new JobBudget({ maxFailedAttempts: 10, timeoutMs, now: () => 0 });
+
+  it("both models busy: waits, goes round again, and the second round answers", async () => {
+    const sleep = vi.fn(async () => {});
+    const { inner, calls } = scripted([overloaded(), overloaded(), "ok"]);
+    const r = await withFallback(inner, { ...opts, sleep }).watch(input, undefined, {
+      budget: budgetOf(140_000),
+    });
+    expect(calls).toEqual(["flash", "lite", "flash"]);
+    expect(r).toMatchObject({ model: "flash", attempts: 3 });
+    expect(sleep.mock.calls.map((c) => (c as unknown as [number])[0])).toContain(5_000);
+  });
+
+  it("stops after the last round and returns the overload error", async () => {
+    const { inner, calls } = scripted(Array.from({ length: 6 }, overloaded));
+    const err = await withFallback(inner, { ...opts, ...noSleep })
+      .watch(input, undefined, { budget: budgetOf(200_000) })
+      .catch((e: MatchCutError) => e);
+    expect(calls).toEqual(["flash", "lite", "flash", "lite", "flash", "lite"]);
+    expect((err as MatchCutError).detail).toMatchObject({ status: 503 });
+  });
+
+  it("doesn't go round again for errors that aren't overload", async () => {
+    const serverError = () => new MatchCutError("UPSTREAM_ERROR", {}, { status: 500 });
+    const { inner, calls } = scripted([serverError(), serverError(), serverError()]);
+    await withFallback(inner, { ...opts, ...noSleep })
+      .watch(input, undefined, { budget: budgetOf(200_000) })
+      .catch(() => undefined);
+    expect(calls).toEqual(["flash", "flash", "lite"]);
+  });
+
+  it("doesn't wait for a round the job budget can't fit", async () => {
+    const sleep = vi.fn(async () => {});
+    const { inner, calls } = scripted([overloaded(), overloaded(), "ok"]);
+    await withFallback(inner, { ...opts, sleep })
+      .watch(input, undefined, { budget: budgetOf(10_000) }) // 10 s - 5 s wait < 8 s minimum
+      .catch(() => undefined);
+    expect(calls).toEqual(["flash", "lite"]);
+  });
+
+  it("without the option, all-busy still gives up after one pass", async () => {
+    const { inner, calls } = scripted([overloaded(), overloaded(), "ok"]);
+    await withFallback(inner, { ...opts, overloadRoundWaitsMs: [], ...noSleep })
+      .watch(input, undefined, { budget: budgetOf(140_000) })
+      .catch(() => undefined);
+    expect(calls).toEqual(["flash", "lite"]);
+  });
+});

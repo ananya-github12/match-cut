@@ -7,6 +7,7 @@
  *   MAX_TOKENS                        retry once on the same model with a higher cap, "be concise"
  *   timeout                           retry only if at least 30 s of the job budget remain
  *   with skipSameModelOnOverload      503, 504 and 429 skip straight to the next model
+ *   with overloadRoundWaitsMs         all models busy: wait, then go through the plan again
  *   blocked, client errors, billing   no retry
  * Every failed attempt spends the job budget; when it runs out the last error is returned.
  */
@@ -47,6 +48,11 @@ export interface FallbackOptions {
   fallbackReserveMs?: number;
   /** Don't start an attempt with less than this left; fail fast instead. Default 0. */
   minAttemptMs?: number;
+  /**
+   * When every model in the plan answered "overloaded", wait this long and go through the plan
+   * again, once per entry, while the job budget allows. Default [] (give up).
+   */
+  overloadRoundWaitsMs?: number[];
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   onAttempt?: (info: {
     model: string;
@@ -54,6 +60,12 @@ export interface FallbackOptions {
     error?: MatchCutError;
     hint?: RetryHint;
   }) => void;
+}
+
+/** "Try again later" answers: overloaded (503), gateway timeout (504) or rate limited. */
+export function isOverload(err: MatchCutError): boolean {
+  const status = err.detail?.status;
+  return status === 503 || status === 504 || err.error.code === "CAPACITY_EXHAUSTED";
 }
 
 /** Failures worth another attempt on the next model in the plan. */
@@ -93,6 +105,7 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
   const minForTimeoutRetry = opts.minRemainingForTimeoutRetryMs ?? 30_000;
   const fallbackReserve = opts.fallbackReserveMs ?? 0;
   const minAttemptMs = opts.minAttemptMs ?? 0;
+  const roundWaits = opts.overloadRoundWaitsMs ?? [];
 
   async function run<I extends { model: string }>(
     input: I,
@@ -116,7 +129,18 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
         { ...(err.detail ?? {}), attempts, models: [...models], failures },
       );
 
-    for (let i = 0; i < plan.length;) {
+    let round = 0;
+    for (let i = 0; ;) {
+      if (i >= plan.length) {
+        // Every model failed. If they were all just busy and time remains, wait and go again.
+        const wait = roundWaits[round];
+        if (wait === undefined || !lastError || !isOverload(lastError)) break;
+        const left = budget ? budget.remainingMs() - (ctx.reserveAfterMs ?? 0) - wait : Infinity;
+        if (left < Math.max(minAttemptMs, 1)) break;
+        round++;
+        await sleep(wait, signal);
+        i = 0;
+      }
       const model = plan[i]!;
       if (attempts > 0) {
         const base = backoff[Math.min(attempts - 1, backoff.length - 1)]!;
@@ -197,10 +221,7 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
         if (!timeoutRetry && !isRetryable(err)) throw giveUp(err);
         if (budget && !budget.fail()) throw giveUp(err);
         i++;
-        const status = err.detail?.status;
-        const overload =
-          status === 503 || status === 504 || err.error.code === "CAPACITY_EXHAUSTED";
-        if (opts.skipSameModelOnOverload && overload) {
+        if (opts.skipSameModelOnOverload && isOverload(err)) {
           // Jump past further tries of this model, but only if another model is left.
           let j = i;
           while (j < plan.length && plan[j] === model) j++;
