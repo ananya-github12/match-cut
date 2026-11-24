@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./errors": "./src/errors.ts",
     "./youtube-url": "./src/youtube-url.ts",
+    "./youtube-channel": "./src/youtube-channel.ts",
     "./timecode": "./src/timecode.ts",
     "./video": "./src/video.ts",
     "./schemas": "./src/schemas.ts"

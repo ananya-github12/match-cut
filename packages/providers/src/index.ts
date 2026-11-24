@@ -8,3 +8,5 @@ export * from "./analyzer/gemini.js";
 export * from "./analyzer/fallback.js";
 export * from "./analyzer/budget.js";
 export * from "./youtube/cached.js";
+export * from "./youtube/channel.js";
+export * from "./youtube/mock-channels.js";

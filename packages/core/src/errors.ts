@@ -27,6 +27,12 @@ export const ERRORS = {
     retryable: false,
     message: "This video has been removed or the link is wrong.",
   },
+  // PRD-playbooks.md, "New error codes".
+  CHANNEL_NOT_FOUND: {
+    http: 404,
+    retryable: false,
+    message: "We couldn't find that channel. Check the handle or paste one of its video links.",
+  },
   VIDEO_NOT_PUBLIC: {
     http: 422,
     retryable: false,

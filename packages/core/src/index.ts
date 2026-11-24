@@ -13,6 +13,7 @@ export {
 export { BRIEF_QUEUE } from "./queue.js";
 export * from "./errors.js";
 export * from "./youtube-url.js";
+export * from "./youtube-channel.js";
 export * from "./timecode.js";
 export * from "./video.js";
 export * from "./schemas.js";
