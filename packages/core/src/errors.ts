@@ -33,6 +33,12 @@ export const ERRORS = {
     retryable: false,
     message: "We couldn't find that channel. Check the handle or paste one of its video links.",
   },
+  NOT_ENOUGH_DATA: {
+    http: 422,
+    retryable: false,
+    message:
+      "This channel doesn't have enough recent Shorts to compare yet. Try a longer time window, or analyze a single video instead.",
+  },
   VIDEO_NOT_PUBLIC: {
     http: 422,
     retryable: false,
@@ -123,6 +129,19 @@ export const WARNINGS = {
 
 export type WarningCode = keyof typeof WARNINGS;
 
+/** Playbook warnings (PRD-playbooks.md, playbook object `warnings[]`). */
+export const PLAYBOOK_WARNINGS = {
+  SMALL_SAMPLE: "Only a few videos could be compared, so treat these patterns as early signals.",
+  MIXED_FORMATS: "This channel also posts long videos; only its Shorts were compared.",
+  LIKES_HIDDEN:
+    "Some of the compared videos hide their likes, so their engagement counts comments only.",
+  RECENT_VIDEOS_EXCLUDED:
+    "{count} uploads from the last {days} days were left out because they're still gaining views.",
+  TOPIC_CONFOUND: "Most breakouts share a topic, so the topic may matter as much as the edit.",
+} as const;
+
+export type PlaybookWarningCode = keyof typeof PLAYBOOK_WARNINGS;
+
 export interface ApiError {
   code: ErrorCode;
   message: string;
@@ -165,4 +184,16 @@ export class MatchCutError extends Error {
     this.http = ERRORS[code].http;
     this.detail = detail;
   }
+}
+
+export interface PlaybookWarning {
+  code: PlaybookWarningCode;
+  message: string;
+}
+
+export function playbookWarning(
+  code: PlaybookWarningCode,
+  vars: Record<string, string | number> = {},
+): PlaybookWarning {
+  return { code, message: fill(PLAYBOOK_WARNINGS[code], vars) };
 }

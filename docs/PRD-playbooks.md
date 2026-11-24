@@ -193,9 +193,10 @@ Shorts detection: duration of 180 seconds or less. YouTube's API has no official
 2. Eligible: Shorts at least 7 days old, so recent uploads aren't penalized for having had less time; younger ones are listed as "too new".
 3. Baseline: median views of eligible Shorts. The median, not the average, so one viral video doesn't set the bar.
 4. Outlier score = views ÷ baseline. Engagement rate = (likes + comments) ÷ views, shown as a secondary signal.
-5. Outliers: score 2.0 or more (configurable), the top 5 by score.
-6. Typical: score between 0.5 and 1.5, the 5 closest to 1.0.
-7. Minimum data: 10 eligible Shorts and 2 outliers. Otherwise `NOT_ENOUGH_DATA`, with how many were found and a suggestion (longer window, or a brief on a single video instead).
+5. Outliers: score 2.0 or more (configurable, inclusive), the top 5 by score; ties go to the newer upload, then the video ID.
+6. Typical: score between 0.5 and 1.5 and below the outlier threshold, the 5 closest to the median in views.
+7. Minimum data: 10 eligible Shorts, 3 outliers and 3 typical videos. Otherwise `NOT_ENOUGH_DATA`, with the reasons (`TOO_FEW_SHORTS`, `TOO_FEW_BREAKOUTS`, `TOO_FEW_TYPICAL`, `NO_VIEWS`), how many were found and a suggestion (longer window, or a brief on a single video instead). Changed from "2 outliers" in the first draft: the comparison drops any pattern with fewer than 3 known values per group, so 2 outliers could never produce a rule.
+8. Data hygiene: the window is re-applied at scoring time (cached stats can be a day old); uploads dated in the future, with a missing or zero duration, or with an impossible view count are left out and counted as `unusable`; a duplicated video ID keeps the copy with the most views. The 50-upload cap applies before eligibility, as the PRD's "at most 50 uploads" reads.
 
 The outlier score is Match Cut's own calculation and must be labeled that way in the UI and API, with its formula one click away.
 
@@ -262,7 +263,7 @@ Gemini receives only the computed table, kept rules, house style and the outlier
 | `baseline` | `median_views`, `median_engagement_rate` |
 | `videos[]` | `id`, `title`, `published_at`, `views`, `likes` (null if hidden), `comments`, `outlier_score`, `group` (`outlier`, `typical`, `other`), `brief_id` |
 | `rules[]`, `house_style`, `not_explained`, `recipe_prompt_template` | From playbook writing |
-| `warnings[]` | For example `SMALL_SAMPLE`, `MIXED_FORMATS`, `LIKES_HIDDEN`, `TOPIC_CONFOUND`, `RECENT_VIDEOS_EXCLUDED` |
+| `warnings[]` | `{code, message}`: `SMALL_SAMPLE` (3 picks on either side, the minimum), `MIXED_FORMATS` (long uploads in the window), `LIKES_HIDDEN` (a compared video hides likes), `RECENT_VIDEOS_EXCLUDED` (uploads under 7 days old), `TOPIC_CONFOUND` (most outliers share a topic); copy below |
 | `meta` | Versions, models, timings, tokens, cost, `cached` |
 
 Statuses are v1's. Stages: `resolving_channel`, `fetching_stats`, `scoring`, `watching` (with `progress: {done, total}`), `extracting`, `comparing`, `writing_playbook`, `validating`.
@@ -340,6 +341,16 @@ YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
 | `NOT_ENOUGH_DATA` | This channel doesn't have enough recent Shorts to compare yet. Try a longer time window, or analyze a single video instead. |
 | `YOUTUBE_NOT_CONNECTED` | Connect your YouTube channel to analyze your own videos. |
 | `YOUTUBE_ACCESS_REVOKED` | Match Cut no longer has access to your channel. Reconnect to continue. |
+
+**Playbook warning copy** (drafted during M10; needs owner sign-off)
+
+| Code | Message |
+| --- | --- |
+| `SMALL_SAMPLE` | Only a few videos could be compared, so treat these patterns as early signals. |
+| `MIXED_FORMATS` | This channel also posts long videos; only its Shorts were compared. |
+| `LIKES_HIDDEN` | Some of the compared videos hide their likes, so their engagement counts comments only. |
+| `RECENT_VIDEOS_EXCLUDED` | {count} uploads from the last {days} days were left out because they're still gaining views. |
+| `TOPIC_CONFOUND` | Most breakouts share a topic, so the topic may matter as much as the edit. |
 
 ## Frontend additions
 
