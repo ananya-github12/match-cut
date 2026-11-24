@@ -352,6 +352,27 @@ test("11. embed-disabled videos show the thumbnail and an Open on YouTube link",
   await expect(page.getByTestId("player")).toHaveCount(0);
 });
 
+test("M9. the shot list shows what to film and plays the beat it recreates", async ({ page }) => {
+  await openMatch(page);
+  await fillAndMatch(page, "mockShort01", unique("shot list"));
+  await expect(page.getByTestId("result")).toBeVisible();
+  const list = page.getByTestId("shot-list");
+  await expect(list.getByText("What to film")).toBeVisible();
+  // The open project's 30 s target length, not the 45 s reference, sets the total.
+  await expect(list.getByText(/^\d+ shots, about 30 s on screen in total\./)).toBeVisible();
+  expect(await list.locator("li").count()).toBeGreaterThanOrEqual(4);
+  await list.scrollIntoViewIfNeeded();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window.__matchCutEvents ?? []).filter((e) => e.name === "shot_list_viewed"),
+      ),
+    )
+    .toHaveLength(1);
+  await list.getByRole("button", { name: `Play the reference's "Question hook" beat` }).click();
+  await expect(page.getByTestId("beat-detail")).toContainText("Question hook");
+});
+
 test.describe("12. offline", () => {
   test("before submit", async ({ page, context }) => {
     await openMatch(page);

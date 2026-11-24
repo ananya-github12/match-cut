@@ -2,6 +2,7 @@ import { loadManifest, type Breakdown } from "@match-cut/core";
 import {
   MockAnalyzer,
   mockPrompt,
+  mockShotList,
   type ModelResult,
   type RepairInput,
   type VideoAnalyzer,
@@ -30,7 +31,10 @@ const good = () => ({
   cardboard_prompt: mockPrompt(input),
   assets_needed: ["Takes"],
   watch_outs: ["Write your own hook."],
+  shot_list: mockShotList(input),
 });
+/** Valid prompt, shot list with too few shots. */
+const badShots = () => ({ ...good(), shot_list: mockShotList(input).slice(0, 2) });
 const res = (output: unknown): ModelResult => ({
   output,
   text: JSON.stringify(output),
@@ -80,6 +84,54 @@ describe("writeAndValidate", () => {
     const bad = res({ ...good(), cardboard_prompt: "too short" });
     const a = fake(bad, bad);
     await expect(writeAndValidate(a, input, [])).rejects.toMatchObject({
+      error: { code: "INVALID_MODEL_OUTPUT" },
+    });
+  });
+});
+
+describe("writeAndValidate shot list (never costs the prompt)", () => {
+  it("a good shot list is kept, with no repair", async () => {
+    const a = fake(res(good()));
+    const r = await writeAndValidate(a, input, spoken_lines_internal);
+    expect(r).toMatchObject({ repairUsed: false, shotListDropped: false });
+    expect(r.output.shot_list.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("a bad shot list gets one repair; fixed, it's kept", async () => {
+    const a = fake(res(badShots()), res(good()));
+    const r = await writeAndValidate(a, input, spoken_lines_internal);
+    expect(a.repair).toHaveBeenCalledOnce();
+    expect(r).toMatchObject({ repairUsed: true, shotListDropped: false });
+    expect(r.output.shot_list.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("still bad after the repair: the prompt is kept and the shot list dropped", async () => {
+    const a = fake(res(badShots()), res(badShots()));
+    const r = await writeAndValidate(a, input, spoken_lines_internal);
+    expect(r).toMatchObject({ repairUsed: true, shotListDropped: true });
+    expect(r.output.cardboard_prompt).toBe(good().cardboard_prompt);
+    expect(r.output.shot_list).toEqual([]);
+  });
+
+  it("the repair call fails: the first prompt is kept, shot list dropped", async () => {
+    const a = fake(res(badShots()));
+    a.repair.mockRejectedValueOnce(new Error("model busy"));
+    const r = await writeAndValidate(a, input, spoken_lines_internal);
+    expect(r).toMatchObject({ shotListDropped: true });
+    expect(r.output.cardboard_prompt).toBe(good().cardboard_prompt);
+  });
+
+  it("the repair breaks a prompt that was fine: the first prompt is kept", async () => {
+    const a = fake(res(badShots()), res({ ...good(), cardboard_prompt: "1. Too short." }));
+    const r = await writeAndValidate(a, input, spoken_lines_internal);
+    expect(r).toMatchObject({ shotListDropped: true });
+    expect(r.output.cardboard_prompt).toBe(good().cardboard_prompt);
+  });
+
+  it("a bad prompt still fails after the repair, as before", async () => {
+    const broken = { ...good(), cardboard_prompt: "1. Too short." };
+    const a = fake(res(broken), res(broken));
+    await expect(writeAndValidate(a, input, spoken_lines_internal)).rejects.toMatchObject({
       error: { code: "INVALID_MODEL_OUTPUT" },
     });
   });

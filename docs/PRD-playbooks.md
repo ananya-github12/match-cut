@@ -118,7 +118,7 @@ The assistant composes the two connectors. Match Cut never calls Cardboard and n
 | `analyze_reference` | `url`, optional `goal`, `format`, `length_seconds`, `clip_start_seconds`, `clip_end_seconds` | The brief: prompt, beats, assets needed, watch-outs. If not done within the wait limit, a brief ID and "still working" |
 | `get_brief` | `brief_id` | Status, or the finished brief |
 | `regenerate_prompt` | `brief_id`, `goal`, `format`, `length_seconds` | A new prompt from the stored breakdown |
-| `shot_list` | `brief_id`, or `playbook_id` plus `goal` | Ordered list of shots to film |
+| `shot_list` | `brief_id`, optional `goal`, `format`, `length_seconds` (M9); `playbook_id` or `skill_id` (M10) | Ordered list of shots to film, with total length. A new goal, format or length rewrites the brief's prompt too. Briefs without a list get one written, once |
 | `build_playbook` | `channel` (handle, channel URL or video URL), optional `window_days`, `max_videos` | Playbook, or a playbook ID and "still working" (M10) |
 | `get_playbook` | `playbook_id` | Status, or the finished playbook (M10) |
 | `apply_playbook` | `playbook_id` or `skill_id`, `goal`, `format`, `length_seconds` | Cardboard prompt and shot list (M10) |
@@ -146,7 +146,15 @@ A pass 2 output for users who haven't filmed yet. Built from the breakdown plus 
 | `shot_list[].maps_to_beat` | integer | Index of the reference beat it recreates |
 | `shot_list[].notes` | string | Delivery, lighting or b-roll tips |
 
-Pass 2 prompt and schema versions bump when the shot list is added, which invalidates pass 2 cache entries only. Semantic checks: total duration within 25% of the target length, `maps_to_beat` valid, no shot copies spoken lines.
+`maps_to_beat` is 1-based: 1 is the breakdown's first beat. Pass 2 prompt and schema versions bump when the shot list is added (`p2.v3`), which invalidates pass 2 cache entries only. Semantic checks: 4 to 15 shots, total duration within 25% of the target length (the user's target, else the analyzed length), `maps_to_beat` valid, no URLs, markdown or injected instructions, no run of more than 12 words from the reference's speech.
+
+**The shot list never costs the user their prompt.** It is checked separately from the prompt. Shot-list problems go into the one repair call with everything else; if the list is still wrong after it, or the repair call itself fails, the brief succeeds with its prompt, an empty `shot_list` and the `SHOT_LIST_UNAVAILABLE` warning. That result is not cached, so regenerating really tries again, and a successful regenerate clears the warning.
+
+The shot list comes back on every brief (`shot_list` on the brief object; `null` for briefs made before shot lists). A list for a different goal, format or length uses the existing `POST /v1/briefs/{id}/regenerate`, so no separate endpoint is needed.
+
+| Warning | Message |
+| --- | --- |
+| `SHOT_LIST_UNAVAILABLE` | We couldn't build a shot list for this video. Regenerate the prompt to try again. |
 
 ## Feature 3: Playbooks from public data (M10)
 
@@ -297,7 +305,6 @@ All under `/v1`, same auth, JSON and idempotency rules as v1.
 | `GET /v1/playbooks/{id}/events` | Stage updates (SSE) | 200 stream |
 | `POST /v1/playbooks/{id}/apply` | Prompt and shot list for a goal, format, length and language | 200 |
 | `DELETE /v1/playbooks/{id}` | Cancel or delete | 204 |
-| `POST /v1/briefs/{id}/shot-list` | Shot list for a brief and goal | 200 |
 | `POST /v1/skills`, `GET /v1/skills`, `GET/DELETE /v1/skills/{id}` | Save, list, read, delete skills | 201, 200, 200, 204 |
 | `POST /v1/skills/{id}/apply` | Prompt and shot list from a skill | 200 |
 | `GET /v1/youtube/connect`, `DELETE /v1/youtube/connection` | Start Google sign-in; disconnect (M11) | 302, 204 |
@@ -342,7 +349,7 @@ YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
   3. "House style" and "What the edit doesn't explain" sections, always visible, never collapsed by default.
   4. Apply panel: goal, format, length; returns prompt and shot list with Copy and Send to Director.
   5. Save as skill.
-- **Brief page**: a "Shot list" tab next to the prompt.
+- **Brief page**: a "What to film" section after "Before you start": a summary line ("{count} shots, about {seconds} s on screen in total. Film these, then run the prompt above on your footage."), then each shot with its framing, time on screen, tips and a "Recreates "{beat}"" button that plays that beat in the reference player.
 - **Skills list**: name, source, last used, Apply.
 - Analytics events: `playbook_started`, `playbook_completed`, `playbook_failed`, `rule_example_played`, `playbook_applied`, `skill_saved`, `skill_applied`, `shot_list_viewed`.
 
@@ -402,6 +409,6 @@ Each follows v1's working rules: tests alongside code, mock mode for everything,
 
 | Milestone | Scope | Done when |
 | --- | --- | --- |
-| **M9: MCP tool and shot list** | `/mcp` server with brief tools; shot list in pass 2 and `POST /v1/briefs/{id}/shot-list`; MockProvider support | A Claude conversation with Match Cut and Cardboard connected turns a link plus the user's clips into an exported video, with confirmation before the edit |
+| **M9: MCP tool and shot list** | `/mcp` server with brief tools and `shot_list`; shot list in pass 2, on every brief and on the brief page; MockProvider support | A Claude conversation with Match Cut and Cardboard connected turns a link plus the user's clips into an exported video, with confirmation before the edit |
 | **M10: Playbooks and saved skills** | Channel resolution, stats, scoring, feature extraction, comparison, playbook writing, validation, endpoints, playbook page, skills, MCP playbook tools, golden channels | A playbook for each of 10 golden channels passes faithfulness checks, and apply returns a valid prompt and shot list |
 | **M11: Own-channel insights** | Google sign-in, retention fetch, drop-offs mapped to beats, own-channel playbook, guardrail metric | A connected test channel shows drop-offs on the beat timeline and an own-channel playbook |

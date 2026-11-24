@@ -33,7 +33,7 @@ describe("brief lifecycle", () => {
       },
       meta: {
         model: "mock-flash",
-        prompt_version: "p1.v1+p2.v2",
+        prompt_version: "p1.v1+p2.v3",
         schema_version: "s1",
         cached: false,
       },

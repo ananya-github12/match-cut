@@ -2,7 +2,8 @@
 /**
  * Result view. PRD "Result view, in order": prompt card (editable; Send to Director, Copy,
  * Regenerate), warnings as quiet notes above the prompt, reference player with a beat timeline,
- * breakdown rows, Before you start and Watch-outs, then a footer with model and time, feedback and
+ * breakdown rows, Before you start, What to film (shot list) and Watch-outs, then a footer with model
+ * and time, feedback and
  * Delete brief. Player rules: privacy-enhanced embed, never autoplay on load, thumbnail and
  * "Open on YouTube" when embedding is disabled.
  */
@@ -42,6 +43,8 @@ export function ResultView(props: {
   onCopy: () => void;
   onRegenerate: (body: RegenerateBody, changed: string[]) => void;
   onBeat: (index: number) => void;
+  /** Once per brief, when the shot list first scrolls into view. */
+  onShotListViewed?: (shots: number) => void;
   onFeedback: (helpful: boolean, reasons: string[], text: string) => void;
   onDelete: () => void;
   onStartOver: () => void;
@@ -62,6 +65,23 @@ export function ResultView(props: {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const shotsRef = useRef<HTMLElement>(null);
+  const shotsSeenFor = useRef<string | null>(null);
+  const shotCount = brief.shot_list?.length ?? 0;
+  const onShotListViewed = props.onShotListViewed;
+  useEffect(() => {
+    const el = shotsRef.current;
+    if (!el || !shotCount || shotsSeenFor.current === brief.id) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting) || shotsSeenFor.current === brief.id) return;
+      shotsSeenFor.current = brief.id;
+      onShotListViewed?.(shotCount);
+      io.disconnect();
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [brief.id, shotCount, onShotListViewed]);
 
   useEffect(() => setRegen(props.regenDefaults), [props.regenDefaults]);
 
@@ -443,6 +463,44 @@ export function ResultView(props: {
               <li key={a}>{a}</li>
             ))}
           </ul>
+        </section>
+      )}
+      {!!brief.shot_list?.length && (
+        <section ref={shotsRef} aria-labelledby="mc-shots-title" data-testid="shot-list">
+          <div id="mc-shots-title" className={css.title}>
+            {S.shotListTitle}
+          </div>
+          <p className={css.muted} style={{ margin: "4px 0 8px" }}>
+            {S.shotListHint(
+              brief.shot_list.length,
+              brief.shot_list.reduce((sum, s) => sum + s.duration_seconds, 0),
+            )}
+          </p>
+          <ol className={css.shots}>
+            {brief.shot_list.map((s, i) => {
+              const ref = brief.breakdown?.beats[s.maps_to_beat - 1];
+              return (
+                <li key={`${i}-${s.shot}`} className={css.shot}>
+                  <div className={css.shotHead}>
+                    <span>{s.shot}</span>
+                    <span className={css.muted}>{S.shotSeconds(s.duration_seconds)}</span>
+                  </div>
+                  <div className={css.muted}>{s.framing}</div>
+                  {s.notes && <div className={css.shotNotes}>{s.notes}</div>}
+                  {ref && (
+                    <button
+                      type="button"
+                      className={css.shotBeat}
+                      aria-label={S.shotBeatAria(ref.label)}
+                      onClick={() => selectBeat(s.maps_to_beat - 1)}
+                    >
+                      {S.shotBeat(ref.label)}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </section>
       )}
       {!!brief.watch_outs?.length && (

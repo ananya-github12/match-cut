@@ -233,6 +233,7 @@ export async function runJob(job: JobData, deps: PipelineDeps): Promise<void> {
     // ---------- Pass 2: write the prompt ----------
     const cached2 = brief.forceRefresh && job.kind === "analyze" ? null : await kv.get(keys.pass2);
     let prompt: Pass2Output;
+    let shotListDropped = false;
     if (cached2) {
       prompt = pass2OutputSchema.parse(JSON.parse(cached2));
       pass2Cached = true;
@@ -268,14 +269,24 @@ export async function runJob(job: JobData, deps: PipelineDeps): Promise<void> {
       await charge(run.model, run.tokens);
       upstreamFailures.push(...run.upstreamFailures);
       if (run.repairUsed) log("pass 2 repaired", { briefId: brief.id, problems: run.problems });
-      if (!run.fallbackUsed) await kv.set(keys.pass2, JSON.stringify(prompt), PASS2_TTL_SECONDS);
+      shotListDropped = run.shotListDropped;
+      if (shotListDropped) log("shot list dropped", { briefId: brief.id, problems: run.problems });
+      // Not cached with a dropped shot list, so "regenerate to try again" really tries again.
+      if (!run.fallbackUsed && !shotListDropped)
+        await kv.set(keys.pass2, JSON.stringify(prompt), PASS2_TTL_SECONDS);
     }
 
     timings.total = (timings.total ?? 0) + (now() - startedAt);
+    // The shot-list warning describes this prompt only; a regenerate clears or re-adds it.
+    const warnings = [
+      ...brief.warnings.filter((w) => w.code !== "SHOT_LIST_UNAVAILABLE"),
+      ...(shotListDropped ? [warning("SHOT_LIST_UNAVAILABLE")] : []),
+    ];
     await save({
       status: "succeeded",
       stage: null,
       prompt,
+      warnings,
       error: null,
       meta: {
         ...brief.meta,

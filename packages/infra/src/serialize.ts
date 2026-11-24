@@ -27,6 +27,7 @@ export function toBriefResponse(r: BriefRecord): BriefResponse {
     cardboard_prompt: r.prompt?.cardboard_prompt ?? null,
     assets_needed: r.prompt?.assets_needed ?? null,
     watch_outs: r.prompt?.watch_outs ?? null,
+    shot_list: r.prompt?.shot_list ?? null,
     warnings: r.warnings,
     error: r.error,
     meta: {

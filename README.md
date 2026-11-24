@@ -31,7 +31,7 @@ Open http://localhost:3000. `corepack pnpm check:setup --ping <link>` checks the
 
 ## Use Match Cut from Claude or ChatGPT (MCP)
 
-The API serves a remote MCP server at `/mcp` with three tools: `analyze_reference`, `get_brief` and `regenerate_prompt`. With Cardboard's connector in the same chat, the assistant can turn a YouTube link into an edit of your own footage.
+The API serves a remote MCP server at `/mcp` with four tools: `analyze_reference`, `get_brief`, `regenerate_prompt` and `shot_list` (what to film). With Cardboard's connector in the same chat, the assistant can turn a YouTube link into an edit of your own footage.
 
 1. Generate a key and add it to the API's `MCP_API_KEYS` (comma-separated; each key is its own user):
 

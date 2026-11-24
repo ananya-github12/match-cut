@@ -2,8 +2,18 @@
  * Pass 2 post-processing. PRD: "Post-processing and validation" (prompt word count, no URLs or
  * markdown), "Input safety" (reject prompts with instructions to ignore rules) and
  * "Copyright and platform terms" (no run of more than 12 words matching the spoken lines).
+ * Shot list checks: PRD-playbooks.md, Feature 2 (4 to 15 shots, valid beats, total within 25%
+ * of the target length).
  */
-import { pass2OutputSchema, type Pass2Output } from "./schemas.js";
+import { z } from "zod";
+import {
+  pass2CoreSchema,
+  SHOT_LIST_MAX,
+  SHOT_LIST_MIN,
+  shotSchema,
+  type Pass2Output,
+  type Shot,
+} from "./schemas.js";
 
 export const PROMPT_MIN_WORDS = 150;
 export const PROMPT_MAX_WORDS = 350;
@@ -58,8 +68,21 @@ export function normalizePass2(raw: unknown): unknown {
         .filter((v) => v !== "");
     }
   }
+  if (Array.isArray(o.shot_list)) {
+    o.shot_list = (o.shot_list as unknown[]).map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const shot = { ...(item as Record<string, unknown>) };
+      for (const k of ["shot", "framing", "notes"]) {
+        if (typeof shot[k] === "string") shot[k] = stripPromptMarkdown(shot[k] as string);
+      }
+      return shot;
+    });
+  }
   return o;
 }
+
+/** Shot durations may add up to this far from the target length (PRD: within 25%). */
+export const SHOT_TOTAL_TOLERANCE = 0.25;
 
 const tokens = (s: string) =>
   s
@@ -98,22 +121,103 @@ const INJECTION =
 const MARKDOWN_LEFT = /(\*\*|__|^#{1,6}\s|```|\[[^\]]+\]\([^)]+\))/m;
 
 export interface Pass2Check {
+  /** True when both the prompt and the shot list pass. */
   ok: boolean;
+  /**
+   * The output whenever the prompt itself is valid. Its shot_list is empty when the shot list
+   * failed, so callers can still save the prompt.
+   */
   output: Pass2Output | null;
+  /** Every problem, prompt and shot list, for the repair call. */
   problems: string[];
+  /** The shot-list subset of `problems`. Only these left: the prompt is fine. */
+  shotListProblems: string[];
 }
 
-export function checkPass2(
-  normalized: unknown,
-  opts: { spokenLines: string[]; language: string },
-): Pass2Check {
-  const parsed = pass2OutputSchema.safeParse(normalized);
+export interface Pass2CheckOptions {
+  spokenLines: string[];
+  language: string;
+  /** Beats in the breakdown, for maps_to_beat. Omit to skip that check. */
+  beatCount?: number;
+  /** Target length in seconds, for the shot-list total. Null or omitted: no total check. */
+  targetSeconds?: number | null;
+}
+
+const issues = (e: z.ZodError, prefix = "") =>
+  e.issues.map((i) => `${prefix}${i.path.join(".") || "root"}: ${i.message}`);
+
+function checkShotList(
+  raw: unknown,
+  opts: Pass2CheckOptions,
+): { shots: Shot[]; problems: string[] } {
+  const parsed = z.array(shotSchema).safeParse(raw ?? []);
+  if (!parsed.success) return { shots: [], problems: issues(parsed.error, "shot_list.") };
+  const shots = parsed.data;
+  const problems: string[] = [];
+  if (shots.length < SHOT_LIST_MIN || shots.length > SHOT_LIST_MAX) {
+    problems.push(
+      `shot_list has ${shots.length} shots; it needs ${SHOT_LIST_MIN} to ${SHOT_LIST_MAX}`,
+    );
+  }
+  if (opts.beatCount !== undefined) {
+    shots.forEach((s, i) => {
+      if (s.maps_to_beat > opts.beatCount!) {
+        problems.push(
+          `shot_list[${i}].maps_to_beat is ${s.maps_to_beat}; the reference has ${opts.beatCount} beats`,
+        );
+      }
+    });
+  }
+  if (opts.targetSeconds && shots.length) {
+    const total = Math.round(shots.reduce((sum, s) => sum + s.duration_seconds, 0));
+    const target = opts.targetSeconds;
+    if (Math.abs(total - target) > target * SHOT_TOTAL_TOLERANCE) {
+      problems.push(
+        `shot_list durations add up to ${total} seconds; they should be close to ${target}`,
+      );
+    }
+  }
+  shots.forEach((s, i) => {
+    for (const [field, text] of [
+      ["shot", s.shot],
+      ["framing", s.framing],
+      ["notes", s.notes],
+    ] as const) {
+      if (URL_IN_TEXT.test(text))
+        problems.push(`shot_list[${i}].${field} contains a URL or web address; remove it`);
+      if (MARKDOWN_LEFT.test(text))
+        problems.push(`shot_list[${i}].${field} contains markdown; use plain text`);
+      if (INJECTION.test(text))
+        problems.push(`shot_list[${i}].${field} contains instructions; describe the shot only`);
+    }
+  });
+  const run = longestSharedRun(
+    shots.map((s) => `${s.shot}\n${s.notes}`).join("\n"),
+    opts.spokenLines,
+  );
+  if (run > MAX_SHARED_RUN) {
+    problems.push(
+      `shot_list repeats ${run} consecutive words from the reference's speech; write original wording`,
+    );
+  }
+  return { shots, problems };
+}
+
+export function checkPass2(normalized: unknown, opts: Pass2CheckOptions): Pass2Check {
+  const rawShots =
+    normalized && typeof normalized === "object"
+      ? (normalized as Record<string, unknown>).shot_list
+      : undefined;
+  const core = (() => {
+    if (!normalized || typeof normalized !== "object") return normalized;
+    const { shot_list: _ignored, ...rest } = normalized as Record<string, unknown>;
+    return rest;
+  })();
+  const parsed = pass2CoreSchema.safeParse(core);
+  const shotCheck = checkShotList(rawShots, opts);
   if (!parsed.success) {
-    return {
-      ok: false,
-      output: null,
-      problems: parsed.error.issues.map((i) => `${i.path.join(".") || "root"}: ${i.message}`),
-    };
+    const problems = [...issues(parsed.error), ...shotCheck.problems];
+    return { ok: false, output: null, problems, shotListProblems: shotCheck.problems };
   }
   const out = parsed.data;
   const problems: string[] = [];
@@ -150,5 +254,11 @@ export function checkPass2(
       `the output repeats ${run} consecutive words from the reference's speech; write original wording`,
     );
   }
-  return { ok: problems.length === 0, output: out, problems };
+  const shotsOk = shotCheck.problems.length === 0;
+  return {
+    ok: problems.length === 0 && shotsOk,
+    output: problems.length === 0 ? { ...out, shot_list: shotsOk ? shotCheck.shots : [] } : null,
+    problems: [...problems, ...shotCheck.problems],
+    shotListProblems: shotCheck.problems,
+  };
 }

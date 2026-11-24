@@ -19,6 +19,11 @@ export default defineConfig({
     baseURL: `http://localhost:${WEB_PORT}`,
     trace: "retain-on-failure",
     permissions: ["clipboard-read", "clipboard-write"],
+    // Optional: a preinstalled Chromium, for machines where the pinned Playwright's own browser
+    // isn't installed (for example cloud sessions).
+    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+      : {}),
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

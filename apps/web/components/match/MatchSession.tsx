@@ -519,6 +519,7 @@ export function MatchSession(props: {
           }
           onRegenerate={regenerate}
           onBeat={(i) => track("beat_clicked", ctx(), { beat_index: i })}
+          onShotListViewed={(shots) => track("shot_list_viewed", ctx(), { shots })}
           onFeedback={(helpful, reasons) => track("brief_feedback", ctx(), { helpful, reasons })}
           onDelete={removeBrief}
           onStartOver={startOver}

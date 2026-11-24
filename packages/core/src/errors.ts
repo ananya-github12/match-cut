@@ -111,6 +111,8 @@ export const WARNINGS = {
   LOW_VISUAL_SIGNAL:
     "The video is mostly a still picture, so there was little visual style to copy.",
   EMBED_DISABLED: "The creator has turned off playback outside YouTube.",
+  SHOT_LIST_UNAVAILABLE:
+    "We couldn't build a shot list for this video. Regenerate the prompt to try again.",
 } as const;
 
 export type WarningCode = keyof typeof WARNINGS;

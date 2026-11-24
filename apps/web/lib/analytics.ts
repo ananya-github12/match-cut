@@ -18,6 +18,7 @@ export type EventName =
   | "prompt_sent_to_director"
   | "prompt_regenerated"
   | "beat_clicked"
+  | "shot_list_viewed"
   | "brief_feedback"
   | "brief_deleted";
 

@@ -86,6 +86,12 @@ export const S = {
   } as Record<string, string>,
   beatsLabel: "Beats",
   assetsTitle: "Before you start",
+  shotListTitle: "What to film",
+  shotListHint: (count: number, seconds: number) =>
+    `${count} shots, about ${Math.round(seconds)} s on screen in total. Film these, then run the prompt above on your footage.`,
+  shotSeconds: (seconds: number) => `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`,
+  shotBeat: (label: string) => `Recreates "${label}"`,
+  shotBeatAria: (label: string) => `Play the reference's "${label}" beat`,
   watchOutsTitle: "Watch-outs",
   openOnYouTube: "Open on YouTube",
   playerTitle: "Reference video",

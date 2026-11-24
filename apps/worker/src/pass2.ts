@@ -1,8 +1,17 @@
 /**
  * Pass 2 with post-processing: write, normalize, schema + semantic checks (word count, no URLs
  * or markdown, no injected instructions, originality vs the reference's spoken lines), one repair.
+ *
+ * The shot list never costs the user their prompt: if only the shot list is still wrong after
+ * the repair (or the repair call fails), the prompt is kept and the shot list is dropped.
  */
-import { checkPass2, MatchCutError, normalizePass2, type Pass2Output } from "@match-cut/core";
+import {
+  checkPass2,
+  MatchCutError,
+  normalizePass2,
+  targetSeconds,
+  type Pass2Output,
+} from "@match-cut/core";
 import type {
   CallContext,
   UpstreamFailure,
@@ -21,6 +30,8 @@ export interface Pass2Run {
   tokens: { input: number; output: number };
   repairUsed: boolean;
   problems: string[];
+  /** The shot list failed its checks and was left empty; the prompt is fine. */
+  shotListDropped: boolean;
 }
 
 const asText = (r: ModelResult) => r.text ?? JSON.stringify(r.output);
@@ -34,7 +45,12 @@ export async function writeAndValidate(
   beforeValidate?: () => Promise<void>,
   ctx?: CallContext,
 ): Promise<Pass2Run> {
-  const opts = { spokenLines, language: input.language };
+  const opts = {
+    spokenLines,
+    language: input.language,
+    beatCount: input.breakdown.beats.length,
+    targetSeconds: targetSeconds(input.breakdown, input.lengthSeconds),
+  };
   const first = await analyzer.writePrompt(input, signal, ctx);
   await beforeValidate?.();
   const tokens = { input: first.usage.inputTokens, output: first.usage.outputTokens };
@@ -42,29 +58,38 @@ export async function writeAndValidate(
     first.output === undefined
       ? { ok: false, output: null, problems: ["The response was not valid JSON."] }
       : checkPass2(normalizePass2(first.output), opts);
-  if (check.ok && check.output) {
-    return {
-      output: check.output,
-      model: first.model,
-      fallbackUsed: first.fallbackUsed ?? false,
-      tokens,
-      repairUsed: false,
-      upstreamFailures: first.upstreamFailures ?? [],
-      problems: [],
-    };
+  const firstRun = (dropped: boolean): Pass2Run => ({
+    output: check.output!,
+    model: first.model,
+    fallbackUsed: first.fallbackUsed ?? false,
+    tokens,
+    repairUsed: false,
+    upstreamFailures: first.upstreamFailures ?? [],
+    problems: dropped ? check.problems : [],
+    shotListDropped: dropped,
+  });
+  if (check.ok && check.output) return firstRun(false);
+  let repaired;
+  try {
+    repaired = await analyzer.repair(
+      { pass: 2, previousOutput: asText(first), problems: check.problems, model: first.model },
+      signal,
+      { budget: ctx?.budget, timeoutMs: REPAIR_TIMEOUT_MS },
+    );
+  } catch (err) {
+    // The prompt was already fine; only the shot list needed fixing. Keep the prompt.
+    if (check.output && !signal?.aborted) return firstRun(true);
+    throw err;
   }
-  const repaired = await analyzer.repair(
-    { pass: 2, previousOutput: asText(first), problems: check.problems, model: first.model },
-    signal,
-    { budget: ctx?.budget, timeoutMs: REPAIR_TIMEOUT_MS },
-  );
   tokens.input += repaired.usage.inputTokens;
   tokens.output += repaired.usage.outputTokens;
   const second =
     repaired.output === undefined
       ? { ok: false, output: null, problems: ["The repaired response was not valid JSON."] }
       : checkPass2(normalizePass2(repaired.output), opts);
-  if (!second.ok || !second.output) {
+  if (!second.output) {
+    // The repair broke a prompt that was fine before: keep the first one.
+    if (check.output) return { ...firstRun(true), tokens };
     throw new MatchCutError(
       "INVALID_MODEL_OUTPUT",
       {},
@@ -83,5 +108,6 @@ export async function writeAndValidate(
     repairUsed: true,
     upstreamFailures: [...(first.upstreamFailures ?? []), ...(repaired.upstreamFailures ?? [])],
     problems: check.problems,
+    shotListDropped: !second.ok,
   };
 }

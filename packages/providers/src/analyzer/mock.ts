@@ -3,7 +3,13 @@
  * Pass 1 returns fixtures/pass1/<videoId>.json, or default.json. Pass 2 fills a template from
  * the breakdown and the user's goal, format and length, so regenerating visibly changes the prompt.
  */
-import { formatTimecode, MatchCutError, type Breakdown } from "@match-cut/core";
+import {
+  formatTimecode,
+  MatchCutError,
+  targetSeconds,
+  type Breakdown,
+  type Shot,
+} from "@match-cut/core";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ApiError, type GenerateContentResponse } from "@google/genai";
@@ -154,6 +160,31 @@ const FORMAT_WORDS: Record<string, string> = {
   "4:5": "4:5 portrait",
 };
 
+const MOCK_FRAMINGS = [
+  "tight close-up, eye level, phone vertical",
+  "medium shot, waist up, slightly off-center",
+  "over-the-shoulder screen recording, cropped to fill the frame",
+  "wide establishing shot, steady, natural light",
+];
+
+/** A shot list that passes the checks: one shot per beat (at least 4), durations summing to the target. */
+export function mockShotList(input: WritePromptInput): Shot[] {
+  const beats = input.breakdown.beats;
+  const count = Math.min(15, Math.max(4, beats.length));
+  const total = targetSeconds(input.breakdown, input.lengthSeconds) ?? 30;
+  const each = Math.round((total / count) * 10) / 10;
+  return Array.from({ length: count }, (_, i) => {
+    const beat = beats[i % beats.length]!;
+    return {
+      shot: `My own take on the "${beat.label}" moment, about my topic`,
+      framing: MOCK_FRAMINGS[i % MOCK_FRAMINGS.length]!,
+      duration_seconds: i === count - 1 ? Math.round((total - each * (count - 1)) * 10) / 10 : each,
+      maps_to_beat: (i % beats.length) + 1,
+      notes: i === 0 ? "Start talking in the first second; no intro." : "",
+    };
+  });
+}
+
 export function mockPrompt(input: WritePromptInput): string {
   const b: Breakdown = input.breakdown;
   const goal = input.goal.trim() || "a video on my own topic in this style";
@@ -234,6 +265,7 @@ export class MockAnalyzer implements VideoAnalyzer {
           "Don't reuse the reference's script or on-screen wording; write your own hook.",
           "Pick your own music; the reference's track is not reused.",
         ],
+        shot_list: mockShotList(input),
       },
       model: input.model,
       usage: { inputTokens: 3000, outputTokens: 800 },

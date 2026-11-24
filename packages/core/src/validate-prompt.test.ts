@@ -13,14 +13,24 @@ const step = (n: number, words: number) =>
 /** A plain prompt of 8 numbered steps, `perStep` words each (plus the step number). */
 const prompt = (perStep = 25) =>
   Array.from({ length: 8 }, (_, i) => step(i + 1, perStep)).join("\n");
+/** A valid shot list: `n` shots of `secs` seconds, mapped to beats 1 to 3. */
+const shots = (n = 5, secs = 9) =>
+  Array.from({ length: n }, (_, i) => ({
+    shot: `Shot ${i + 1} of my own topic`,
+    framing: "medium shot, eye level, phone vertical",
+    duration_seconds: secs,
+    maps_to_beat: (i % 3) + 1,
+    notes: "",
+  }));
 const output = (over: Record<string, unknown> = {}) => ({
   cardboard_prompt: prompt(),
   assets_needed: ["Talking-head takes"],
   watch_outs: ["Write your own hook."],
+  shot_list: shots(),
   ...over,
 });
 const check = (o: unknown, spokenLines: string[] = [], language = "en") =>
-  checkPass2(normalizePass2(o), { spokenLines, language });
+  checkPass2(normalizePass2(o), { spokenLines, language, beatCount: 3, targetSeconds: 45 });
 
 describe("checkPass2 (PRD post-processing and input safety)", () => {
   it("passes a plain 150 to 350 word numbered prompt", () => {
@@ -95,5 +105,81 @@ describe("splitInlineSteps", () => {
     const lines = "1. A.\n2. B.\n3. C.";
     expect(splitInlineSteps(lines)).toBe(lines);
     expect(splitInlineSteps("Keep it at 2. Then stop.")).toBe("Keep it at 2. Then stop.");
+  });
+});
+
+describe("checkPass2 shot list (PRD-playbooks.md, Feature 2)", () => {
+  it("passes 4 to 15 shots on valid beats that add up to about the target", () => {
+    const r = check(output());
+    expect(r).toMatchObject({ ok: true, shotListProblems: [] });
+    expect(r.output?.shot_list).toHaveLength(5);
+  });
+
+  it("flags too few or too many shots", () => {
+    expect(check(output({ shot_list: shots(3, 15) })).shotListProblems.join()).toMatch(
+      /3 shots; it needs 4 to 15/,
+    );
+    expect(check(output({ shot_list: shots(16, 3) })).shotListProblems.join()).toMatch(/16 shots/);
+  });
+
+  it("flags beats that don't exist", () => {
+    const bad = shots();
+    bad[2]!.maps_to_beat = 9;
+    expect(check(output({ shot_list: bad })).shotListProblems.join()).toMatch(
+      /maps_to_beat is 9; the reference has 3 beats/,
+    );
+  });
+
+  it("flags a total more than 25% off the target, and allows anything within", () => {
+    expect(check(output({ shot_list: shots(5, 12) })).shotListProblems.join()).toMatch(
+      /add up to 60 seconds; they should be close to 45/,
+    );
+    expect(check(output({ shot_list: shots(5, 11) })).ok).toBe(true); // 55 s, within 25%
+    expect(
+      checkPass2(normalizePass2(output({ shot_list: shots(5, 30) })), {
+        spokenLines: [],
+        language: "en",
+      }).ok,
+    ).toBe(true); // no target known: no total check
+  });
+
+  it("strips markdown from shots, and flags URLs and the reference's own words", () => {
+    const md = shots();
+    md[0]!.shot = "**Close-up** of my hands";
+    expect(check(output({ shot_list: md })).output?.shot_list[0]!.shot).toBe(
+      "Close-up of my hands",
+    );
+    const url = shots();
+    url[1]!.notes = "Use the clip from www.example.com";
+    expect(check(output({ shot_list: url })).shotListProblems.join()).toMatch(/URL/);
+    const line = "today I am going to show you the three things nobody tells you about launching";
+    const copied = shots();
+    copied[0]!.shot = `Say: ${line}`;
+    expect(check(output({ shot_list: copied }), [line]).shotListProblems.join()).toMatch(
+      /consecutive words/,
+    );
+  });
+
+  it("a bad shot list keeps the prompt: output with an empty list, problems listed", () => {
+    const r = check(output({ shot_list: shots(2, 22) }));
+    expect(r.ok).toBe(false);
+    expect(r.output?.cardboard_prompt).toBe(prompt());
+    expect(r.output?.shot_list).toEqual([]);
+    expect(r.problems).toEqual(r.shotListProblems);
+  });
+
+  it("a missing or malformed shot list is a shot-list problem, not a prompt problem", () => {
+    const missing = check(output({ shot_list: undefined }));
+    expect(missing.output).not.toBeNull();
+    expect(missing.shotListProblems.length).toBeGreaterThan(0);
+    const malformed = check(output({ shot_list: [{ shot: "x" }] }));
+    expect(malformed.output).not.toBeNull();
+    expect(malformed.shotListProblems.join()).toMatch(/shot_list\./);
+  });
+
+  it("a bad prompt still fails, whatever the shot list", () => {
+    const r = check(output({ cardboard_prompt: prompt(5) }));
+    expect(r.output).toBeNull();
+    expect(r.problems.join()).toMatch(/at least 150/);
   });
 });

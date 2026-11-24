@@ -2,7 +2,15 @@
  * M9: the Match Cut MCP server, driven by the official MCP client over real HTTP, in mock mode.
  * PRD-playbooks.md, Feature 1.
  */
-import { MOCK_FAULT_IDS, MOCK_VIDEOS } from "@match-cut/providers";
+import {
+  MOCK_FAULT_IDS,
+  MOCK_VIDEOS,
+  MockAnalyzer,
+  type CallContext,
+  type ModelResult,
+  type VideoAnalyzer,
+  type WritePromptInput,
+} from "@match-cut/providers";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { harness } from "./helpers.js";
@@ -17,9 +25,10 @@ afterEach(async () => {
 });
 
 /** API listening on a random port, with the MCP server on. */
-async function server(opts: { autoRun?: boolean; keys?: string[] } = {}) {
+async function server(opts: { autoRun?: boolean; keys?: string[]; analyzer?: VideoAnalyzer } = {}) {
   const h = harness({
     autoRun: opts.autoRun ?? true,
+    analyzer: opts.analyzer,
     app: { mcp: { keys: opts.keys ?? [KEY_A, KEY_B], waitMs: 3000, pollMs: 20 } },
   });
   await h.app.listen({ port: 0, host: "127.0.0.1" });
@@ -58,6 +67,7 @@ describe("Match Cut MCP server", () => {
       "analyze_reference",
       "get_brief",
       "regenerate_prompt",
+      "shot_list",
     ]);
     const analyze = tools.find((t) => t.name === "analyze_reference")!;
     expect(analyze.inputSchema.required).toEqual(["url"]);
@@ -219,5 +229,90 @@ describe("MCP endpoint access", () => {
       const res = await h.app.inject({ method, url: "/mcp" });
       expect(res.statusCode).toBe(405);
     }
+  });
+});
+
+/** Mock that writes a too-short shot list (dropped by validation) while `broken` is true. */
+class SwitchableShots extends MockAnalyzer {
+  broken = true;
+  override async writePrompt(
+    input: WritePromptInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult> {
+    const res = await super.writePrompt(input, signal, ctx);
+    if (!this.broken) return res;
+    const output = res.output as { shot_list: unknown[] };
+    const bad = { ...output, shot_list: output.shot_list.slice(0, 2) };
+    return { ...res, output: bad, text: JSON.stringify(bad) };
+  }
+}
+
+type ShotsOut = {
+  brief_id: string;
+  status: string;
+  shot_list: { maps_to_beat: number; duration_seconds: number }[];
+  total_seconds: number | null;
+  next_step: string;
+};
+
+describe("shot_list tool", () => {
+  it("briefs mention the shot list; shot_list returns it in edit order with totals", async () => {
+    const { url } = await server();
+    const client = await connect(url);
+    const res = await client.callTool({ name: "analyze_reference", arguments: { url: SHORT } });
+    expect(text(res)).toMatch(/Shot list: \d+ shots to film/);
+    const id = (res.structuredContent as Structured).brief_id;
+
+    const shots = await client.callTool({ name: "shot_list", arguments: { brief_id: id } });
+    expect(shots.isError).toBeFalsy();
+    const out = shots.structuredContent as ShotsOut;
+    expect(out.shot_list.length).toBeGreaterThanOrEqual(4);
+    expect(out.total_seconds).toBeCloseTo(45, 0);
+    expect(text(shots)).toMatch(/^1\. \[beat 1, /m);
+    expect(text(shots)).toMatch(/Framing: /);
+  });
+
+  it("a new length plans shots for the new video", async () => {
+    const { url } = await server();
+    const client = await connect(url);
+    const res = await client.callTool({ name: "analyze_reference", arguments: { url: SHORT } });
+    const id = (res.structuredContent as Structured).brief_id;
+    const shots = await client.callTool({
+      name: "shot_list",
+      arguments: { brief_id: id, length_seconds: 20 },
+    });
+    expect((shots.structuredContent as ShotsOut).total_seconds).toBeCloseTo(20, 0);
+  });
+
+  it("a brief whose shot list was dropped gets a new one, without re-watching", async () => {
+    const analyzer = new SwitchableShots();
+    const { url } = await server({ analyzer });
+    const client = await connect(url);
+    const res = await client.callTool({ name: "analyze_reference", arguments: { url: SHORT } });
+    const brief = res.structuredContent as Structured & { shot_list: unknown[] };
+    expect(brief.status).toBe("succeeded");
+    expect(brief.shot_list).toEqual([]);
+    expect(text(res)).toMatch(/couldn't build a shot list/);
+
+    analyzer.broken = false;
+    const shots = await client.callTool({
+      name: "shot_list",
+      arguments: { brief_id: brief.brief_id },
+    });
+    expect((shots.structuredContent as ShotsOut).shot_list.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("still no list after the retry: says so plainly instead of erroring", async () => {
+    const analyzer = new SwitchableShots();
+    const { url } = await server({ analyzer });
+    const client = await connect(url);
+    const res = await client.callTool({ name: "analyze_reference", arguments: { url: SHORT } });
+    const id = (res.structuredContent as Structured).brief_id;
+    const shots = await client.callTool({ name: "shot_list", arguments: { brief_id: id } });
+    expect(shots.isError).toBeFalsy();
+    const out = shots.structuredContent as ShotsOut;
+    expect(out.shot_list).toEqual([]);
+    expect(out.next_step).toMatch(/No shot list could be made/);
   });
 });

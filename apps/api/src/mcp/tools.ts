@@ -53,6 +53,14 @@ const lengthSeconds = z
   .max(600)
   .describe("Target length of the user's video in seconds; omit to match the reference");
 
+const shotOut = z.object({
+  shot: z.string(),
+  framing: z.string(),
+  duration_seconds: z.number(),
+  maps_to_beat: z.number(),
+  notes: z.string(),
+});
+
 const briefOutput = z.object({
   brief_id: z.string(),
   status: z.enum(["queued", "processing", "succeeded", "partial", "failed", "cancelled"]),
@@ -70,6 +78,7 @@ const briefOutput = z.object({
   beats: z.array(z.object({ start: z.string(), end: z.string(), label: z.string() })),
   assets_needed: z.array(z.string()),
   watch_outs: z.array(z.string()),
+  shot_list: z.array(shotOut).nullable(),
   warnings: z.array(z.object({ code: z.string(), message: z.string() })),
   next_step: z.string(),
 });
@@ -122,6 +131,7 @@ export function toOutput(b: BriefResponse): BriefOutput {
     beats: (b.breakdown?.beats ?? []).map((x) => ({ start: x.start, end: x.end, label: x.label })),
     assets_needed: b.assets_needed ?? [],
     watch_outs: b.watch_outs ?? [],
+    shot_list: b.shot_list,
     warnings: b.warnings,
     next_step: nextStep(b),
   };
@@ -142,6 +152,8 @@ export function toText(o: BriefOutput): string {
     lines.push(`Brief ready for ${head}.`, "", "Cardboard prompt:", o.cardboard_prompt);
     if (o.assets_needed.length) lines.push("", `Prepare first: ${o.assets_needed.join("; ")}`);
     if (o.watch_outs.length) lines.push(`Watch-outs: ${o.watch_outs.join("; ")}`);
+    if (o.shot_list?.length)
+      lines.push(`Shot list: ${o.shot_list.length} shots to film (call shot_list to see them).`);
   } else if (o.status === "partial") {
     lines.push(`Breakdown ready for ${head}, but the prompt wasn't written.`);
     if (o.hook) lines.push("", `Hook: ${o.hook}`);
@@ -153,6 +165,54 @@ export function toText(o: BriefOutput): string {
   for (const w of o.warnings) lines.push(`Note: ${w.message}`);
   lines.push("", `Next: ${o.next_step}`);
   return lines.join("\n");
+}
+
+const shotListOutput = z.object({
+  brief_id: z.string(),
+  status: briefOutput.shape.status,
+  shot_list: z.array(shotOut),
+  total_seconds: z.number().nullable(),
+  next_step: z.string(),
+});
+type ShotListOutput = z.infer<typeof shotListOutput>;
+
+function seconds(n: number): string {
+  return Number.isInteger(n) ? `${n} s` : `${n.toFixed(1)} s`;
+}
+
+export function shotListText(o: ShotListOutput, title: string | null): string {
+  const lines: string[] = [];
+  if (o.shot_list.length) {
+    const total = o.total_seconds === null ? "" : `, about ${seconds(o.total_seconds)}`;
+    lines.push(
+      `Shot list for ${title ? `"${title}"` : "this brief"} (${o.shot_list.length} shots${total}):`,
+    );
+    o.shot_list.forEach((s, i) => {
+      const tip = s.notes ? ` Tip: ${s.notes}` : "";
+      lines.push(
+        `${i + 1}. [beat ${s.maps_to_beat}, ${seconds(s.duration_seconds)}] ${s.shot}. Framing: ${s.framing}.${tip}`,
+      );
+    });
+  } else {
+    lines.push(`No shot list for brief ${o.brief_id} yet (status: ${o.status}).`);
+  }
+  lines.push("", `Next: ${o.next_step}`);
+  return lines.join("\n");
+}
+
+/** Body for /regenerate from optional tool arguments. */
+function regenerateBody(a: {
+  goal?: string;
+  format?: string;
+  length_seconds?: number;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (a.goal !== undefined) body.goal = a.goal;
+  const target: Record<string, unknown> = {};
+  if (a.format) target.format = a.format;
+  if (a.length_seconds !== undefined) target.length_seconds = a.length_seconds;
+  if (Object.keys(target).length) body.target = target;
+  return body;
 }
 
 function briefResult(b: BriefResponse) {
@@ -272,16 +332,66 @@ export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpSe
       outputSchema: briefOutput,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ brief_id, goal, format: fmt, length_seconds }) => {
-      const body: Record<string, unknown> = {};
-      if (goal !== undefined) body.goal = goal;
-      const target: Record<string, unknown> = {};
-      if (fmt) target.format = fmt;
-      if (length_seconds !== undefined) target.length_seconds = length_seconds;
-      if (Object.keys(target).length) body.target = target;
-      const res = await api.regenerate(brief_id, body);
+    async ({ brief_id, ...rest }) => {
+      const res = await api.regenerate(brief_id, regenerateBody(rest));
       if ((res.status !== 200 && res.status !== 202) || !isBrief(res.body)) return errorResult(res);
       return briefResult(await settle(res.body));
+    },
+  );
+
+  server.registerTool(
+    "shot_list",
+    {
+      title: "What to film",
+      description:
+        "List the shots the user should film to make their version of the reference, in edit order, with framing, time on screen and the reference beat each one recreates. Use it when the user hasn't filmed yet. Pass a goal, format or length to plan for a different video; this rewrites the brief's prompt too, without re-watching the reference.",
+      inputSchema: z.object({
+        brief_id: BRIEF_ID,
+        goal: z
+          .string()
+          .max(GOAL_MAX_CHARS)
+          .optional()
+          .describe("New goal to plan the shots for; omit to keep it"),
+        format: format.optional(),
+        length_seconds: lengthSeconds.optional(),
+      }),
+      outputSchema: shotListOutput,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ brief_id, ...rest }) => {
+      const body = regenerateBody(rest);
+      let res = Object.keys(body).length
+        ? await api.regenerate(brief_id, body)
+        : await api.get(brief_id);
+      if ((res.status !== 200 && res.status !== 202) || !isBrief(res.body)) return errorResult(res);
+      let b = await settle(res.body);
+      // Briefs from before shot lists, partial briefs, or a dropped list: write a new one, once.
+      const missing = b.status === "partial" || (b.status === "succeeded" && !b.shot_list?.length);
+      if (missing && !Object.keys(body).length) {
+        res = await api.regenerate(brief_id, {});
+        if ((res.status !== 200 && res.status !== 202) || !isBrief(res.body))
+          return errorResult(res);
+        b = await settle(res.body);
+      }
+      if (b.status === "failed" || b.status === "cancelled") return briefResult(b);
+      const shots = b.shot_list ?? [];
+      const out: ShotListOutput = {
+        brief_id: b.id,
+        status: b.status,
+        shot_list: shots,
+        total_seconds: shots.length
+          ? Math.round(shots.reduce((sum, s) => sum + s.duration_seconds, 0) * 10) / 10
+          : null,
+        next_step: shots.length
+          ? "Show the user the list. Once they've filmed, the brief's Cardboard prompt edits the footage."
+          : b.status === "queued" || b.status === "processing"
+            ? "Still working. Wait about 10 seconds, then call shot_list again with this brief_id."
+            : "No shot list could be made this time. Try again in a minute, or use the Cardboard prompt on its own.",
+      };
+      return {
+        content: [{ type: "text" as const, text: shotListText(out, b.video?.title ?? null) }],
+        structuredContent: out,
+      };
     },
   );
 

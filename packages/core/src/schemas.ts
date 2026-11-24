@@ -120,10 +120,32 @@ export type Pass1Output = z.infer<typeof pass1OutputSchema>;
 
 // ---------- Pass 2: prompt ----------
 
-export const pass2OutputSchema = z.object({
+/** One shot the user should film. PRD-playbooks.md, Feature 2. */
+export const shotSchema = z.object({
+  shot: z.string().min(1).max(300),
+  framing: z.string().min(1).max(200),
+  duration_seconds: z.number().positive().max(120),
+  /** Reference beat it recreates, 1 = first beat of the breakdown. */
+  maps_to_beat: z.number().int().min(1),
+  notes: z.string().max(300).default(""),
+});
+export type Shot = z.infer<typeof shotSchema>;
+export const SHOT_LIST_MIN = 4;
+export const SHOT_LIST_MAX = 15;
+
+/** The prompt part of pass 2. A problem here fails the brief. */
+export const pass2CoreSchema = z.object({
   cardboard_prompt: z.string().min(1),
   assets_needed: z.array(z.string().min(1)).max(8),
   watch_outs: z.array(z.string().min(1)).min(1).max(8),
+});
+
+/**
+ * Pass 2 output as stored and cached. The shot list is checked on its own: if it can't be fixed,
+ * the brief keeps its prompt and gets an empty list plus a SHOT_LIST_UNAVAILABLE warning.
+ */
+export const pass2OutputSchema = pass2CoreSchema.extend({
+  shot_list: z.array(shotSchema).max(SHOT_LIST_MAX).default([]),
 });
 export type Pass2Output = z.infer<typeof pass2OutputSchema>;
 
@@ -150,6 +172,8 @@ export interface BriefResponse {
   cardboard_prompt: string | null;
   assets_needed: string[] | null;
   watch_outs: string[] | null;
+  /** What to film; null before the prompt exists or for briefs made before shot lists. */
+  shot_list: Shot[] | null;
   warnings: { code: string; message: string }[];
   error: { code: string; message: string; retryable: boolean } | null;
   meta: {

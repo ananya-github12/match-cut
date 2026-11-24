@@ -203,7 +203,7 @@ describe("logged per job (PRD list)", () => {
       model: "mock-flash",
       versions: {
         pass1Prompt: "p1.v1",
-        pass2Prompt: "p2.v2",
+        pass2Prompt: "p2.v3",
         schema: "s1",
         manifest: "0-placeholder",
       },
