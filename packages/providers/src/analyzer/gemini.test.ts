@@ -5,6 +5,8 @@ import {
 } from "@google/genai";
 import {
   MatchCutError,
+  FEATURES_RESPONSE_SCHEMA,
+  FEATURES_SYSTEM_INSTRUCTION,
   PASS1_RESPONSE_SCHEMA,
   PASS1_SYSTEM_INSTRUCTION,
   PASS2_RESPONSE_SCHEMA,
@@ -281,5 +283,43 @@ describe("pass1AttemptTimeoutMs", () => {
   it("uses the clip length when a range is set", () => {
     const clip = input({ durationSeconds: 1200, range: { start_seconds: 0, end_seconds: 20 } });
     expect(pass1AttemptTimeoutMs(clip)).toBe(60_000);
+  });
+});
+
+describe("GeminiAnalyzer.extractFeatures (PRD-playbooks.md, Feature extraction)", () => {
+  const breakdown = JSON.parse(
+    readFileSync(new URL("../../fixtures/pass1/default.json", import.meta.url), "utf8"),
+  );
+
+  it("is text only: the breakdown as delimited data, the feature schema, no video", async () => {
+    const generateContent = vi.fn(async (_p: GenerateContentParameters) =>
+      resp({ text: '{"hook_type":"question"}' }),
+    );
+    const a = new GeminiAnalyzer({ client: { generateContent } });
+    const r = await a.extractFeatures({ videoId: "abcdefghijk", breakdown, model: "m" });
+    const sent = generateContent.mock.calls[0]![0];
+    const parts = part(sent);
+    expect(parts).toHaveLength(1);
+    expect(parts[0]!.text).toContain("<<<BREAKDOWN");
+    expect(parts[0]!.text).not.toContain("abcdefghijk");
+    expect(JSON.stringify(sent.contents)).not.toContain("fileData");
+    expect(sent.config?.responseJsonSchema).toBe(FEATURES_RESPONSE_SCHEMA);
+    expect(sent.config?.systemInstruction).toBe(FEATURES_SYSTEM_INSTRUCTION);
+    expect(sent.config?.temperature).toBe(0.1);
+    expect(r.output).toEqual({ hook_type: "question" });
+  });
+
+  it("repairs feature output with the feature schema", async () => {
+    const generateContent = vi.fn(async (_p: GenerateContentParameters) => resp());
+    const a = new GeminiAnalyzer({ client: { generateContent } });
+    await a.repair({
+      pass: "features",
+      previousOutput: '{"hook_type":"clickbait"}',
+      problems: ["hook_type: invalid"],
+      model: "m",
+    });
+    const sent = generateContent.mock.calls[0]![0];
+    expect(part(sent)[0]!.text).toContain("hook_type: invalid");
+    expect(sent.config?.responseJsonSchema).toBe(FEATURES_RESPONSE_SCHEMA);
   });
 });

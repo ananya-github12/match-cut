@@ -15,6 +15,8 @@ export * from "./errors.js";
 export * from "./youtube-url.js";
 export * from "./youtube-channel.js";
 export * from "./playbooks/scoring.js";
+export * from "./playbooks/features.js";
+export * from "./playbooks/compare.js";
 export * from "./timecode.js";
 export * from "./video.js";
 export * from "./schemas.js";

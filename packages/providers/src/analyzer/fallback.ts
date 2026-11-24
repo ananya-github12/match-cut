@@ -14,6 +14,7 @@
 import { MatchCutError } from "@match-cut/core";
 import type {
   CallContext,
+  ExtractFeaturesInput,
   ModelResult,
   UpstreamFailure,
   RepairInput,
@@ -242,5 +243,7 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
       run(input, (i, s, c) => inner.repair(i, s, c), signal, ctx),
     writePrompt: (input: WritePromptInput, signal?: AbortSignal, ctx?: CallContext) =>
       run(input, (i, s, c) => inner.writePrompt(i, s, c), signal, ctx),
+    extractFeatures: (input: ExtractFeaturesInput, signal?: AbortSignal, ctx?: CallContext) =>
+      run(input, (i, s, c) => inner.extractFeatures(i, s, c), signal, ctx),
   };
 }

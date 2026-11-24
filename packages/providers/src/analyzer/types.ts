@@ -44,8 +44,17 @@ export interface WatchInput {
   durationSeconds: number | null;
 }
 
+/** Text-only: classify a breakdown's edit into playbook features (PRD-playbooks.md). */
+export interface ExtractFeaturesInput {
+  /** Not sent to the model; lets the offline mock vary by video. */
+  videoId: string;
+  breakdown: Breakdown;
+  model: string;
+}
+
 export interface RepairInput {
-  pass: 1 | 2;
+  /** Which call's output is being repaired: pass 1, pass 2, or playbook features. */
+  pass: 1 | 2 | "features";
   /** The model's previous output, as text. */
   previousOutput: string;
   /** Plain-English list of failed checks. */
@@ -90,4 +99,10 @@ export interface VideoAnalyzer {
   ): Promise<ModelResult>;
   /** One text-only repair call: fix the listed problems without re-watching. */
   repair(input: RepairInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult>;
+  /** Text-only: a breakdown's edit as playbook features. */
+  extractFeatures(
+    input: ExtractFeaturesInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult>;
 }

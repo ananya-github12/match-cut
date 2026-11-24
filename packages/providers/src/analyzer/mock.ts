@@ -4,6 +4,7 @@
  * the breakdown and the user's goal, format and length, so regenerating visibly changes the prompt.
  */
 import {
+  UNKNOWN,
   formatTimecode,
   MatchCutError,
   targetSeconds,
@@ -13,8 +14,10 @@ import {
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ApiError, type GenerateContentResponse } from "@google/genai";
+import { mockFeatures } from "../youtube/mock-channels.js";
 import { mapGeminiError, readResponse } from "./gemini.js";
 import type {
+  ExtractFeaturesInput,
   CallContext,
   ModelResult,
   RepairInput,
@@ -38,7 +41,7 @@ export type MockFault =
   | { output: unknown; text?: string }; // a specific (possibly invalid) response body
 
 export interface MockCall {
-  method: "watch" | "writePrompt" | "repair";
+  method: "watch" | "writePrompt" | "repair" | "extractFeatures";
   model: string;
   hint?: string;
   timeoutMs?: number;
@@ -104,7 +107,7 @@ export const MOCK_FAULT_IDS = {
 } as const;
 
 export interface MockAnalyzerOptions {
-  faults?: Partial<Record<"watch" | "writePrompt" | "repair", MockFault[]>>;
+  faults?: Partial<Record<MockCall["method"], MockFault[]>>;
   /** Simulated latency per pass. Tests use 0. */
   watchDelayMs?: number;
   writeDelayMs?: number;
@@ -245,6 +248,29 @@ export class MockAnalyzer implements VideoAnalyzer {
     };
   }
 
+  async extractFeatures(
+    input: ExtractFeaturesInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult> {
+    const faulted = await this.fault("extractFeatures", input.model, signal, ctx);
+    if (faulted) return faulted;
+    // Every answer quotes real breakdown text, so it survives the grounding check.
+    const quote = input.breakdown.hook.split(/\s+/).slice(0, 8).join(" ");
+    const output = Object.fromEntries(
+      Object.entries(mockFeatures(input.videoId)).map(([feature, value]) => [
+        feature,
+        { value, evidence: value === UNKNOWN ? "" : quote },
+      ]),
+    );
+    return {
+      output,
+      text: JSON.stringify(output),
+      model: input.model,
+      usage: { inputTokens: 1200, outputTokens: 80 },
+    };
+  }
+
   async writePrompt(
     input: WritePromptInput,
     signal?: AbortSignal,
@@ -279,7 +305,7 @@ export class MockAnalyzer implements VideoAnalyzer {
   async repair(input: RepairInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult> {
     const faulted = await this.fault("repair", input.model, signal, ctx);
     if (faulted) return faulted;
-    if (input.pass === 2) {
+    if (input.pass === 2 || input.pass === "features") {
       let output: unknown;
       try {
         output = JSON.parse(input.previousOutput);

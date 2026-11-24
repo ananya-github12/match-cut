@@ -43,6 +43,7 @@ function fake(
     watch: vi.fn(async () => watch),
     writePrompt: base.writePrompt.bind(base),
     repair: vi.fn(async () => repair ?? result(fixture)),
+    extractFeatures: base.extractFeatures.bind(base),
   };
 }
 

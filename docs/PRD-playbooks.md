@@ -204,12 +204,12 @@ The outlier score is Match Cut's own calculation and must be labeled that way in
 
 **Feature extraction (text only, cached per breakdown)**
 
-A small Gemini call turns each breakdown into a fixed feature row. `unknown` is always allowed; the model must not guess.
+A small Gemini call turns each breakdown into a fixed feature row. `unknown` is always allowed; the model must not guess, and code enforces it: every answer other than `unknown` comes with an exact quote from the breakdown, and an answer whose quote isn't in the breakdown (case, punctuation and spacing aside, at least 3 whole words) becomes `unknown`. Internal spoken lines never reach this call.
 
 | Feature | Values |
 | --- | --- |
 | `hook_type` | `question`, `bold_claim`, `result_first`, `visual_surprise`, `story_open`, `other`, `unknown` |
-| `first_words_at_seconds` | number or `unknown` |
+| `first_words_timing` | `under_1s`, `1_to_3s`, `over_3s`, `no_speech`, `unknown` (a bucket rather than the draft's number: only the bucket is compared, and a categorical answer validates cleanly) |
 | `text_on_screen_first_second` | `yes`, `no`, `unknown` |
 | `face_in_first_shot` | `yes`, `no`, `unknown` |
 | `avg_shot_length_bucket` | `under_1s`, `1_to_2s`, `2_to_4s`, `over_4s` (from `format.avg_shot_length_seconds`) |
@@ -220,7 +220,9 @@ A small Gemini call turns each breakdown into a fixed feature row. `unknown` is 
 | `ending` | `call_to_action`, `loop`, `cliffhanger`, `abrupt`, `other`, `unknown` |
 | `video_type` | From the breakdown |
 
-The feature list is versioned like prompts and schemas; changing it bumps the version and invalidates feature cache entries.
+`avg_shot_length_bucket`, `length_bucket` and `video_type` are computed in code. `video_type` is free text, so it is shown as context and never becomes a rule.
+
+The feature list is versioned like prompts and schemas (`FEATURES_VERSION`); changing it bumps the version and invalidates feature cache entries.
 
 **Comparison (deterministic code)**
 
@@ -230,9 +232,11 @@ For every feature value, count how many outliers and how many typical videos hav
 | --- | --- |
 | High | Present in at least 80% of outliers and at most 30% of typical videos, with at least 4 outliers known |
 | Medium | Difference of at least 40 percentage points between the groups |
-| Dropped | Smaller differences, or fewer than 3 known values in either group |
+| Dropped | Smaller differences, fewer than 3 known values in either group, or (added in M10) fewer than 3 outliers carrying the value, which keeps 2-of-3 noise out |
 
-Also computed: features shared by nearly all videos on the channel (the channel's "house style", reported separately), and the outliers' common topics from titles (reported under "what the edit doesn't explain").
+Thresholds are checked in exact integer arithmetic. Only values more common among outliers become rules, at most one per feature (the strongest), at most 5 in all, high before medium, then by difference. A catch-all value (`other`) stays in the evidence table but never becomes advice.
+
+Also computed: values shared by at least 80% of the compared videos (the "house style", reported separately and never repeating a rule), and the outliers' common title topics (reported under "what the edit doesn't explain"). A topic is a title word, after dropping stop words and merging plurals, found in at least 3 outliers and 60% of them, and in at most 30% of typical videos; unspaced scripts are compared in two-character pieces. Titles are owner text: only counted, never followed.
 
 **Playbook writing (text only)**
 
@@ -406,6 +410,7 @@ Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook,
 
 - [ ] Sign-off on the two changed v1 non-goals.
 - [ ] Is there a reliable Shorts signal in the YouTube API, or is duration the only option?
+- [ ] Should pass 1 answer the first-second features directly (text on screen, face, first words)? The breakdown often doesn't state them, so grounded extraction answers `unknown`. Asking pass 1 changes its schema and cache, so it needs sign-off.
 - [ ] Is subscribers gained available per video in the YouTube Analytics API for Shorts?
 - [ ] What do the YouTube API Developer Policies require for storing statistics and showing derived metrics like the outlier score?
 - [ ] Current MCP transport and auth requirements for Claude and ChatGPT custom connectors.

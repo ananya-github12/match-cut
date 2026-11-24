@@ -7,3 +7,5 @@ export const PASS1_PROMPT_VERSION = "p1.v1";
 // p2.v3: adds shot_list (what to film) to the output (PRD-playbooks.md, Feature 2).
 export const PASS2_PROMPT_VERSION = "p2.v3";
 export const SCHEMA_VERSION = "s1";
+/** Playbook edit features (PRD-playbooks.md, Feature 3 > Feature extraction). */
+export const FEATURES_VERSION = "f1";

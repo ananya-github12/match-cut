@@ -4,7 +4,7 @@
  * Video IDs are 11 characters starting with "m" + a 3-character channel code, so they never
  * collide with MOCK_VIDEOS; MockAnalyzer watches them with its default fixture.
  */
-import type { ChannelRef } from "@match-cut/core";
+import { MODEL_FEATURES, UNKNOWN, type ChannelRef, type ModelFeature } from "@match-cut/core";
 import type {
   ChannelInfo,
   ChannelLookup,
@@ -37,9 +37,27 @@ export interface MockChannelSpec {
   flat?: boolean;
   /** Titles of outliers share this topic (for "what the edit doesn't explain"). */
   outlierTopic?: string;
+  /**
+   * The planted truth for evals: every breakout (multiplier >= 2) has these feature values and
+   * other uploads never do. The offline feature extractor reads it.
+   */
+  pattern?: Partial<Record<ModelFeature, string>>;
+  /** The oldest breakout breaks the first pattern feature (a counterexample). */
+  counterexample?: boolean;
 }
 
+/** Patterns planted in the golden channels, one per channel in rotation. */
+export const MOCK_PATTERNS: Partial<Record<ModelFeature, string>>[] = [
+  { hook_type: "question", caption_style: "word_by_word" },
+  { hook_type: "result_first", zoom_punch_ins: "frequent" },
+  { first_words_timing: "under_1s", text_on_screen_first_second: "yes" },
+  { hook_type: "bold_claim", music: "trending_or_upbeat" },
+  { ending: "loop", caption_style: "word_by_word" },
+];
+
 const golden = (n: number, over: Partial<MockChannelSpec> = {}): MockChannelSpec => ({
+  pattern: MOCK_PATTERNS[(n - 1) % MOCK_PATTERNS.length],
+  counterexample: n === 3 || n === 7,
   handle: `mockgolden${String(n).padStart(2, "0")}`,
   code: `g${String(n).padStart(2, "0")}`,
   title: `Mock Golden Channel ${n}`,
@@ -230,4 +248,53 @@ export class MockChannelLookup implements ChannelLookup {
       .slice(0, query.maxVideos);
     return { status: "ok", videos };
   }
+}
+
+/** The spec and upload index behind an offline video ID, if it belongs to a mock channel. */
+export function mockVideoSource(
+  videoId: string,
+  specs: MockChannelSpec[] = MOCK_CHANNEL_SPECS,
+): { spec: MockChannelSpec; index: number } | null {
+  const m = /^m(.{3})v(\d{6})$/.exec(videoId);
+  if (!m) return null;
+  const spec = specs.find((s) => s.code === m[1]);
+  return spec ? { spec, index: Number(m[2]) } : null;
+}
+
+/**
+ * Offline feature extraction: breakouts of a channel with a planted pattern carry it, other
+ * uploads never do; every other feature is seeded noise, about 1 in 10 answered "unknown".
+ */
+export function mockFeatures(
+  videoId: string,
+  specs: MockChannelSpec[] = MOCK_CHANNEL_SPECS,
+): Record<ModelFeature, string> {
+  const source = mockVideoSource(videoId, specs);
+  const spec = source?.spec;
+  const index = source?.index ?? 0;
+  const isBreakout = spec ? (spec.outliers[index] ?? 1) >= 2 : false;
+  const breakoutIndexes = spec
+    ? Object.entries(spec.outliers)
+        .filter(([, m]) => m >= 2)
+        .map(([i]) => Number(i))
+    : [];
+  const counterexampleAt = spec?.counterexample ? Math.max(...breakoutIndexes) : -1;
+  const firstPatternFeature = spec?.pattern ? (Object.keys(spec.pattern)[0] as ModelFeature) : null;
+
+  const row = {} as Record<ModelFeature, string>;
+  for (const feature of Object.keys(MODEL_FEATURES) as ModelFeature[]) {
+    const rand = rng(`${videoId}:${feature}`);
+    const allowed = MODEL_FEATURES[feature] as readonly string[];
+    const planted = spec?.pattern?.[feature];
+    const notPlanted = planted ? allowed.filter((v) => v !== planted) : [...allowed];
+    const pick = (from: readonly string[]) => from[Math.floor(rand() * from.length)]!;
+    if (planted && isBreakout && !(index === counterexampleAt && feature === firstPatternFeature)) {
+      row[feature] = planted;
+    } else if (rand() < 0.1) {
+      row[feature] = UNKNOWN;
+    } else {
+      row[feature] = pick(notPlanted);
+    }
+  }
+  return row;
 }

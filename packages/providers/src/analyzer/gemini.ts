@@ -8,6 +8,10 @@
  */
 import {
   canonicalYouTubeUrl,
+  FEATURES_RESPONSE_SCHEMA,
+  FEATURES_SYSTEM_INSTRUCTION,
+  featuresRepairText,
+  featuresUserText,
   MatchCutError,
   PASS1_RESPONSE_SCHEMA,
   PASS1_SYSTEM_INSTRUCTION,
@@ -28,6 +32,7 @@ import {
 } from "@google/genai";
 import type {
   CallContext,
+  ExtractFeaturesInput,
   ModelResult,
   RepairInput,
   RetryHint,
@@ -55,6 +60,15 @@ export interface GeminiAnalyzerOptions {
 export const PASS1_GENERATION = {
   temperature: 0.3,
   maxOutputTokens: 4096,
+} as const;
+
+/**
+ * Feature extraction: a short classification with a quote per answer; low temperature for
+ * stable labels. Room for 8 quotes plus thinking, which counts toward the cap.
+ */
+export const FEATURES_GENERATION = {
+  temperature: 0.1,
+  maxOutputTokens: 2048,
 } as const;
 
 /** Pass 2: text only. A little more latitude for wording; thinking counts toward the cap. */
@@ -312,30 +326,64 @@ export class GeminiAnalyzer implements VideoAnalyzer {
     signal?: AbortSignal,
     ctx: CallContext = {},
   ): Promise<ModelResult> {
-    const pass1 = input.pass === 1;
+    const spec = {
+      1: {
+        text: pass1RepairText,
+        system: PASS1_SYSTEM_INSTRUCTION,
+        generation: PASS1_GENERATION,
+        schema: PASS1_RESPONSE_SCHEMA,
+      },
+      2: {
+        text: pass2RepairText,
+        system: PASS2_SYSTEM_INSTRUCTION,
+        generation: PASS2_GENERATION,
+        schema: PASS2_RESPONSE_SCHEMA,
+      },
+      features: {
+        text: featuresRepairText,
+        system: FEATURES_SYSTEM_INSTRUCTION,
+        generation: FEATURES_GENERATION,
+        schema: FEATURES_RESPONSE_SCHEMA,
+      },
+    }[input.pass];
     return this.call(
       {
         model: input.model,
         contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: pass1
-                  ? pass1RepairText(input.previousOutput, input.problems)
-                  : pass2RepairText(input.previousOutput, input.problems),
-              },
-            ],
-          },
+          { role: "user", parts: [{ text: spec.text(input.previousOutput, input.problems) }] },
         ],
         config: {
-          systemInstruction: pass1 ? PASS1_SYSTEM_INSTRUCTION : PASS2_SYSTEM_INSTRUCTION,
-          ...(pass1 ? PASS1_GENERATION : PASS2_GENERATION),
+          systemInstruction: spec.system,
+          ...spec.generation,
           responseMimeType: "application/json",
-          responseJsonSchema: pass1 ? PASS1_RESPONSE_SCHEMA : PASS2_RESPONSE_SCHEMA,
+          responseJsonSchema: spec.schema,
           thinkingConfig: { thinkingLevel: this.thinkingLevel },
           abortSignal: signal,
           httpOptions: { timeout: Math.min(this.repairTimeoutMs, ctx.timeoutMs ?? Infinity) },
+        },
+      },
+      input.model,
+      signal,
+    );
+  }
+
+  async extractFeatures(
+    input: ExtractFeaturesInput,
+    signal?: AbortSignal,
+    ctx: CallContext = {},
+  ): Promise<ModelResult> {
+    return this.call(
+      {
+        model: input.model,
+        contents: [{ role: "user", parts: [{ text: featuresUserText(input.breakdown) }] }],
+        config: {
+          systemInstruction: FEATURES_SYSTEM_INSTRUCTION,
+          ...FEATURES_GENERATION,
+          responseMimeType: "application/json",
+          responseJsonSchema: FEATURES_RESPONSE_SCHEMA,
+          thinkingConfig: { thinkingLevel: this.thinkingLevel },
+          abortSignal: signal,
+          httpOptions: { timeout: Math.min(this.pass2TimeoutMs, ctx.timeoutMs ?? Infinity) },
         },
       },
       input.model,

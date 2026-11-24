@@ -8,6 +8,10 @@ import {
 } from "./channel.js";
 import {
   GOLDEN_CHANNEL_HANDLES,
+  MOCK_CHANNEL_SPECS,
+  mockFeatures,
+  mockVideoId,
+  mockVideoSource,
   MOCK_CHANNEL_NOT_FOUND,
   MOCK_CHANNEL_UNAVAILABLE,
   MockChannelLookup,
@@ -550,5 +554,37 @@ describe("golden channels satisfy the PRD's minimum data, with margin", () => {
     expect(flat.filter((v) => v.views / base >= 2).length).toBe(0);
     expect((await vids("mocktiny")).length).toBeLessThan(10);
     expect((await vids("mockhidden")).some((v) => v.comments === null)).toBe(true);
+  });
+});
+
+describe("mockFeatures: the planted truth for playbook evals", () => {
+  it("breakouts of a golden channel carry its pattern; other uploads never do", () => {
+    const spec = MOCK_CHANNEL_SPECS.find((s) => s.handle === "mockgolden01")!;
+    const [feature, value] = Object.entries(spec.pattern!)[0]!;
+    for (let i = 0; i < spec.uploads; i++) {
+      const row = mockFeatures(mockVideoId(spec.code, i)) as Record<string, string>;
+      const breakout = (spec.outliers[i] ?? 1) >= 2;
+      if (breakout) expect(row[feature]).toBe(value);
+      else expect(row[feature]).not.toBe(value);
+    }
+  });
+  it("a counterexample channel has exactly one breakout breaking the first pattern feature", () => {
+    const spec = MOCK_CHANNEL_SPECS.find((s) => s.handle === "mockgolden03")!;
+    expect(spec.counterexample).toBe(true);
+    const [feature, value] = Object.entries(spec.pattern!)[0]!;
+    const breakouts = Object.entries(spec.outliers)
+      .filter(([, m]) => m >= 2)
+      .map(([i]) => Number(i));
+    const breaking = breakouts.filter(
+      (i) => (mockFeatures(mockVideoId(spec.code, i)) as Record<string, string>)[feature] !== value,
+    );
+    expect(breaking).toEqual([Math.max(...breakouts)]);
+  });
+  it("is deterministic, only allowed values or unknown, and handles non-channel IDs", () => {
+    const id = mockVideoId("g02", 4);
+    expect(mockFeatures(id)).toEqual(mockFeatures(id));
+    expect(mockVideoSource(id)).toMatchObject({ index: 4, spec: { code: "g02" } });
+    expect(mockVideoSource("mockShort01")).toBeNull();
+    expect(Object.keys(mockFeatures("mockShort01"))).toHaveLength(8);
   });
 });

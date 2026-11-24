@@ -40,6 +40,7 @@ const analyzerWith = (over: Partial<VideoAnalyzer>): VideoAnalyzer => ({
   watch: mock.watch.bind(mock),
   writePrompt: mock.writePrompt.bind(mock),
   repair: mock.repair.bind(mock),
+  extractFeatures: mock.extractFeatures.bind(mock),
   ...over,
 });
 
@@ -329,5 +330,30 @@ describe("withFallback when every model is overloaded (incident 2026-11-23)", ()
       .watch(input, undefined, { budget: budgetOf(140_000) })
       .catch(() => undefined);
     expect(calls).toEqual(["flash", "lite"]);
+  });
+});
+
+describe("extractFeatures (PRD-playbooks.md) rides the same chain", () => {
+  const fx = { videoId: "mockShort01", breakdown: {} as never, model: "flash" };
+
+  it("an overloaded model falls back like the other calls", async () => {
+    const inner = analyzerWith({
+      extractFeatures: vi
+        .fn()
+        .mockRejectedValueOnce(overloaded())
+        .mockRejectedValueOnce(overloaded())
+        .mockResolvedValue(ok("x")),
+    });
+    const r = await withFallback(inner, { fallbacks: ["flash-old"], ...noSleep }).extractFeatures(
+      fx,
+    );
+    expect(r).toMatchObject({ model: "flash-old", fallbackUsed: true });
+  });
+
+  it("mock fault injection works for the new method", async () => {
+    const m = new MockAnalyzer({ faults: { extractFeatures: [{ output: { hook_type: "x" } }] } });
+    const r = await m.extractFeatures(fx);
+    expect(r.output).toEqual({ hook_type: "x" });
+    expect(m.calls.map((c) => c.method)).toEqual(["extractFeatures"]);
   });
 });
