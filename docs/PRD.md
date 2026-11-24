@@ -107,6 +107,8 @@ flowchart TB
 
 Phases are ordered, not dated; dates get set once the Cardboard team confirms engineering capacity.
 
+**Addendum (draft, Nov 24, 2026):** [PRD-playbooks.md](PRD-playbooks.md) adds the Match Cut MCP tool, shot lists, channel playbooks, saved skills and own-channel insights (milestones M9 to M11). It proposes changing two v1 non-goals (explaining past performance; combining patterns from several videos of one channel) and pulls saved styles forward from v1.1. Those changes need sign-off before M10.
+
 ## Backend: architecture and request flow
 
 Match Cut is a small stateless API plus a worker pool. The API validates and queues; workers call Gemini twice, validate the output and save the brief for the client to fetch.
