@@ -130,7 +130,7 @@ The assistant composes the two connectors. Match Cut never calls Cardboard and n
 - Each tool result has a short human-readable text part and a structured part, so assistants can both show and chain it.
 - Tool descriptions say that the prompt is meant for Cardboard's connector, and that the user should confirm before the edit runs (v1's "never run without confirmation" rule).
 - Transport: remote MCP over HTTPS at `/mcp` on the API service. Verify the current MCP transport and auth requirements for Claude and ChatGPT connectors before building.
-- Auth: demo mode accepts anonymous use with per-connection rate limits and the global spend cap; production uses OAuth with Cardboard identity once available. No Gemini or YouTube key is ever exposed.
+- Auth: an API key per user or team from `MCP_API_KEYS`, sent as `Authorization: Bearer <key>` (Claude's custom connectors send fixed request headers). Each key is its own user, with its own briefs and rate limits, in a separate `mcp` org for org-wide limits. No keys configured means the endpoint is off. Anonymous access was rejected because anyone with the URL could spend the Gemini budget. Production moves to OAuth with Cardboard identity once available. No Gemini or YouTube key is ever exposed.
 - Same rate limits, caps, caching and logging rules as the HTTP API; goal text is never logged.
 
 ## Feature 2: Shot list (M9)

@@ -2,6 +2,7 @@ import {
   DEFAULT_LIMITS,
   loadEnv,
   loadManifest,
+  mcpApiKeys,
   modelNames,
   useYouTubeLookup,
 } from "@match-cut/core";
@@ -91,6 +92,7 @@ const app = buildApp({
   models,
   manifest: loadManifest(),
   devToken: env.DEV_API_TOKEN,
+  mcp: { keys: mcpApiKeys(env) },
   region: env.YOUTUBE_REGION,
   limits: {
     ...DEFAULT_LIMITS,

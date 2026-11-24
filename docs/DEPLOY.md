@@ -61,6 +61,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml rm -sf api worke
    | `DAILY_SPEND_CAP_USD` | start low, e.g. `2` |
    | `RATE_ORG_PER_DAY` | for a public demo, e.g. `200` (all visitors share one org) |
    | `WEB_ORIGIN` | your Vercel URL |
+   | `MCP_API_KEYS` | optional: keys for the MCP server at `/mcp` (`openssl rand -hex 24`); empty turns it off |
 
    Give it a public domain and set the health check path to `/v1/health`. The API runs database
    migrations on start. The host's `PORT` is used automatically.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env.js";
+import { mcpApiKeys, parseEnv } from "./env.js";
 
 describe("parseEnv", () => {
   it("runs in mock mode with no API keys", () => {
@@ -41,6 +41,22 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ DEV_API_TOKEN: "t", PROVIDER: "openai" })).toThrow(/PROVIDER/);
     expect(() => parseEnv({ DEV_API_TOKEN: "t", DAILY_SPEND_CAP_USD: "-1" })).toThrow(
       /DAILY_SPEND_CAP_USD/,
+    );
+  });
+});
+
+describe("MCP_API_KEYS", () => {
+  const base = { DEV_API_TOKEN: "t", PROVIDER: "mock" };
+  it("splits, trims and drops empties", () => {
+    const k1 = "k".repeat(24);
+    const k2 = "m".repeat(30);
+    expect(mcpApiKeys(parseEnv({ ...base, MCP_API_KEYS: ` ${k1} ,, ${k2} ` }))).toEqual([k1, k2]);
+    expect(mcpApiKeys(parseEnv(base))).toEqual([]);
+  });
+  it("rejects short or oddly shaped keys", () => {
+    expect(() => parseEnv({ ...base, MCP_API_KEYS: "short" })).toThrow(/MCP_API_KEYS/);
+    expect(() => parseEnv({ ...base, MCP_API_KEYS: `${"k".repeat(24)} space` })).toThrow(
+      /MCP_API_KEYS/,
     );
   });
 });

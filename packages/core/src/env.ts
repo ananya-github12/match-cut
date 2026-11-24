@@ -66,6 +66,11 @@ export const envSchema = z
     MOCK_WRITE_DELAY_MS: z.coerce.number().int().min(0).default(2000),
     /** Days to keep briefs (PRD: 90). */
     BRIEF_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+    /**
+     * Match Cut MCP server (/mcp): comma-separated API keys, each at least 24 characters.
+     * Each key is its own user. Empty: the MCP server is off.
+     */
+    MCP_API_KEYS: optionalString,
     /** Browser origin allowed to call the API (CORS). */
     WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   })
@@ -91,6 +96,17 @@ export const envSchema = z
         message: "YOUTUBE_DATA_API_KEY is required when VIDEO_LOOKUP=youtube",
       });
     }
+    for (const key of mcpApiKeys(env)) {
+      if (key.length < 24 || !/^[A-Za-z0-9_-]+$/.test(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["MCP_API_KEYS"],
+          message:
+            "MCP_API_KEYS: each key needs 24+ characters of letters, digits, - or _ (openssl rand -hex 24)",
+        });
+        break;
+      }
+    }
     if (env.PROVIDER !== "gemini") return;
     const required = [
       "GEMINI_API_KEY",
@@ -111,6 +127,14 @@ export const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** The MCP API keys from MCP_API_KEYS, trimmed, empties dropped. */
+export function mcpApiKeys(env: { MCP_API_KEYS?: string }): string[] {
+  return (env.MCP_API_KEYS ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
 
 /** Validates a plain env object. Throws one readable error listing every problem. */
 export function parseEnv(source: Record<string, string | undefined>): Env {

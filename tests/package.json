@@ -12,6 +12,7 @@
     "@match-cut/infra": "workspace:*",
     "@match-cut/providers": "workspace:*",
     "@match-cut/worker": "workspace:*",
+    "@modelcontextprotocol/client": "^2.4.0",
     "bullmq": "^5.56.0",
     "ioredis": "^5.6.1"
   }

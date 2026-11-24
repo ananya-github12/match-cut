@@ -10,16 +10,19 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
+    "@google/genai": "2.32.0",
     "@match-cut/core": "workspace:*",
+    "@match-cut/infra": "workspace:*",
     "@match-cut/providers": "workspace:*",
+    "@match-cut/worker": "workspace:*",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "bullmq": "^5.56.0",
     "fastify": "^5.4.0",
     "ioredis": "^5.6.1",
     "postgres": "^3.4.7",
-    "@match-cut/infra": "workspace:*",
-    "bullmq": "^5.56.0",
-    "@google/genai": "2.32.0",
-    "@match-cut/worker": "workspace:*",
-    "tsx": "^4.20.0"
+    "tsx": "^4.20.0",
+    "zod": "^4.6.7"
   },
   "exports": {
     "./app": "./src/app.ts",

@@ -3,6 +3,7 @@
 export {
   envSchema,
   loadEnv,
+  mcpApiKeys,
   modelNames,
   parseEnv,
   useYouTubeLookup,

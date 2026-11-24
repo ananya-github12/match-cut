@@ -20,6 +20,8 @@ import type { VideoLookup } from "@match-cut/providers";
 import Fastify from "fastify";
 import { makeAuthenticate } from "./auth.js";
 import { runHealthChecks, type HealthChecks } from "./health.js";
+import { mcpRoutes } from "./mcp/route.js";
+import type { McpToolOptions } from "./mcp/tools.js";
 import { briefsRoutes } from "./routes/briefs.js";
 import { videosRoutes } from "./routes/videos.js";
 
@@ -42,6 +44,8 @@ export interface AppDeps {
   limiter?: RateLimiter;
   spend?: SpendTracker;
   syncRun?: (record: BriefRecord) => Promise<BriefRecord>;
+  /** Match Cut MCP server at /mcp. Off when no keys are given. */
+  mcp?: McpToolOptions & { keys: string[] };
 }
 
 export function buildApp(deps: AppDeps) {
@@ -96,6 +100,11 @@ export function buildApp(deps: AppDeps) {
     region,
     limits,
     authenticate,
+  });
+  app.register(mcpRoutes, {
+    ...deps.mcp,
+    keys: deps.mcp?.keys ?? [],
+    devToken: deps.devToken,
   });
 
   return app;

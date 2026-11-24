@@ -29,6 +29,21 @@ corepack pnpm local:hybrid   # real YouTube previews and player, mock analysis (
 
 Open http://localhost:3000. `corepack pnpm check:setup --ping <link>` checks the keys first. Real runs are billed by Google; the daily cap is `DAILY_SPEND_CAP_USD` (default $5).
 
+## Use Match Cut from Claude or ChatGPT (MCP)
+
+The API serves a remote MCP server at `/mcp` with three tools: `analyze_reference`, `get_brief` and `regenerate_prompt`. With Cardboard's connector in the same chat, the assistant can turn a YouTube link into an edit of your own footage.
+
+1. Generate a key and add it to the API's `MCP_API_KEYS` (comma-separated; each key is its own user):
+
+   ```sh
+   openssl rand -hex 24
+   ```
+
+2. In Claude: Settings → Connectors → Add custom connector. URL: `https://<api-domain>/mcp`. Under request headers, add `Authorization: Bearer <your key>`. The server must be reachable on port 443.
+3. Also connect Cardboard (Claude's connector directory), then ask: "Make my clips look like this Short: <link>".
+
+Locally: `curl -s localhost:4000/mcp` answers 405 (POST only); `tests/mcp.test.ts` drives every tool with the official MCP client.
+
 ## Checks
 
 ```sh
