@@ -7,6 +7,12 @@ import type {
   JobData,
   JobQueue,
   KV,
+  PlaybookPatch,
+  PlaybookRecord,
+  PlaybookStore,
+  SkillPatch,
+  SkillRecord,
+  SkillStore,
 } from "./types.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -99,5 +105,76 @@ export class MemoryJobQueue implements JobQueue {
   async enqueue(job: JobData) {
     this.jobs.push(job);
     this.onEnqueue?.(job);
+  }
+}
+
+export class MemoryPlaybookStore implements PlaybookStore {
+  readonly rows = new Map<string, PlaybookRecord>();
+  async create(rec: PlaybookRecord) {
+    this.rows.set(rec.id, clone(rec));
+  }
+  async get(id: string) {
+    const r = this.rows.get(id);
+    return r ? clone(r) : null;
+  }
+  async update(id: string, patch: PlaybookPatch) {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    const next = { ...r, ...clone(patch), updatedAt: new Date() };
+    this.rows.set(id, next);
+    return clone(next);
+  }
+  async delete(id: string) {
+    this.rows.delete(id);
+  }
+  async deleteOlderThan(cutoff: Date) {
+    let n = 0;
+    for (const [id, r] of this.rows) {
+      if (r.createdAt < cutoff) {
+        this.rows.delete(id);
+        n++;
+      }
+    }
+    return n;
+  }
+}
+
+/** Most recently used (or created) first, then newest, then ID: the same order as Postgres. */
+export function skillOrder(a: SkillRecord, b: SkillRecord): number {
+  const used = (s: SkillRecord) => (s.lastUsedAt ?? s.createdAt).getTime();
+  return (
+    used(b) - used(a) ||
+    b.createdAt.getTime() - a.createdAt.getTime() ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+}
+
+export class MemorySkillStore implements SkillStore {
+  readonly rows = new Map<string, SkillRecord>();
+  async create(rec: SkillRecord, limit: number) {
+    const mine = [...this.rows.values()].filter((r) => r.userId === rec.userId).length;
+    if (mine >= limit) return false;
+    this.rows.set(rec.id, clone(rec));
+    return true;
+  }
+  async get(id: string) {
+    const r = this.rows.get(id);
+    return r ? clone(r) : null;
+  }
+  async listByUser(userId: string) {
+    return [...this.rows.values()]
+      .filter((r) => r.userId === userId)
+      .sort(skillOrder)
+      .map((r) => clone(r));
+  }
+  async update(id: string, patch: SkillPatch) {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    const next = { ...r, ...clone(patch), updatedAt: new Date() };
+    this.rows.set(id, next);
+    return clone(next);
+  }
+  async delete(id: string) {
+    this.rows.delete(id);
   }
 }

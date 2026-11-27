@@ -11,3 +11,8 @@ export const SCHEMA_VERSION = "s1";
 export const FEATURES_VERSION = "f1";
 /** Playbook writing prompt, output schema and checks (PRD-playbooks.md, Feature 3). */
 export const PLAYBOOK_VERSION = "pb1";
+/**
+ * Scoring and comparison rules (eligibility, picking, thresholds, house style, topics). Part of
+ * the playbook cache key (PRD-playbooks.md, Cost, limits and caching).
+ */
+export const COMPARISON_VERSION = "c1";

@@ -4,9 +4,20 @@ import type {
   Breakdown,
   BriefStage,
   BriefStatus,
+  CandidateRule,
+  ChannelRef,
   Detail,
+  FeatureCount,
+  FeatureRow,
+  HouseStyle,
   Pass2Output,
+  PlaybookContent,
+  PlaybookRule,
+  PlaybookStage,
+  PlaybookWarning,
+  ScoringWindow,
   TargetFormat,
+  VideoGroup,
   Warning,
 } from "@match-cut/core";
 
@@ -111,4 +122,168 @@ export interface JobData {
 
 export interface JobQueue {
   enqueue(job: JobData): Promise<void>;
+}
+
+// ---------- Playbooks (PRD-playbooks.md, Feature 3) ----------
+
+export interface PlaybookSettings {
+  windowDays: number;
+  maxVideos: number;
+  outlierThreshold: number;
+}
+
+export interface PlaybookChannel {
+  id: string;
+  title: string;
+  handle: string | null;
+  /** Rounded down by YouTube; null when hidden. */
+  subscriberCount: number | null;
+  subscriberCountHidden: boolean;
+}
+
+/** One upload in the window, with its public stats (deleted with the playbook, see retention). */
+export interface PlaybookVideo {
+  id: string;
+  title: string;
+  publishedAt: string;
+  durationSeconds: number;
+  views: number;
+  likes: number | null;
+  comments: number | null;
+  outlierScore: number | null;
+  engagementRate: number | null;
+  group: VideoGroup;
+  /** The brief holding a compared video's breakdown, when one was saved. */
+  briefId: string | null;
+}
+
+/** Everything the comparison computed: the evidence table behind the rules, kept for evals. */
+export interface PlaybookComparison {
+  table: FeatureCount[];
+  rules: CandidateRule[];
+  houseStyle: HouseStyle[];
+  outlierTopics: string[];
+  /** Each compared video's feature row. */
+  features: { videoId: string; group: "outlier" | "typical"; features: FeatureRow }[];
+}
+
+/** The written playbook. Its warnings are merged into PlaybookRecord.warnings. */
+export type PlaybookStoredContent = Omit<PlaybookContent, "warnings">;
+
+export interface PlaybookMeta {
+  /** Model per step: pass1, features, playbook. */
+  models: Record<string, string>;
+  /** Versions behind this playbook (pass 1, schema, features, comparison, playbook). */
+  versions: Record<string, string>;
+  cached: boolean;
+  timingsMs: Record<string, number>;
+  tokens: Record<string, number>;
+  costUsd?: number;
+  /** Feature answers that had no real quote and became "unknown". */
+  ungrounded?: number;
+  /** The writer's output needed the repair call / still needed fallbacks after it. */
+  repairUsed?: boolean;
+  fallbacksUsed?: boolean;
+  lastErrorCode?: string;
+  failure?: BriefMeta["failure"];
+  upstreamFailures?: BriefMeta["upstreamFailures"];
+}
+
+/** A playbook as stored. Spoken lines and the parsed source stay internal. */
+export interface PlaybookRecord {
+  id: string;
+  userId: string;
+  orgId: string;
+  status: BriefStatus;
+  stage: PlaybookStage | null;
+  progress: { done: number; total: number } | null;
+  /** The parsed channel input; the raw text the user typed is never stored. */
+  source: ChannelRef;
+  settings: PlaybookSettings;
+  forceRefresh: boolean;
+  channel: PlaybookChannel | null;
+  window: ScoringWindow | null;
+  baseline: { medianViews: number; medianEngagementRate: number | null } | null;
+  videos: PlaybookVideo[];
+  comparison: PlaybookComparison | null;
+  content: PlaybookStoredContent | null;
+  /** Internal only: the breakouts' spoken lines, for copy checks when a recipe is applied. */
+  spokenLines: string[] | null;
+  warnings: PlaybookWarning[];
+  error: ApiError | null;
+  meta: PlaybookMeta;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type PlaybookPatch = Partial<Omit<PlaybookRecord, "id" | "userId" | "orgId" | "createdAt">>;
+
+export interface PlaybookStore {
+  create(rec: PlaybookRecord): Promise<void>;
+  get(id: string): Promise<PlaybookRecord | null>;
+  update(id: string, patch: PlaybookPatch): Promise<PlaybookRecord | null>;
+  delete(id: string): Promise<void>;
+  /** Retention: YouTube statistics are kept no longer than allowed. Returns how many. */
+  deleteOlderThan(cutoff: Date): Promise<number>;
+}
+
+// ---------- Skills (PRD-playbooks.md, Feature 4) ----------
+
+export type SkillSource = { type: "brief"; id: string } | { type: "playbook"; id: string };
+
+/**
+ * What apply needs, copied at save time so a skill keeps working after its brief or playbook is
+ * deleted and caches expire. No view counts: only the rules' evidence counts and the recipe.
+ */
+export type SkillSnapshot =
+  | {
+      type: "brief";
+      videoId: string;
+      videoTitle: string | null;
+      breakdown: Breakdown;
+      /** Internal only: for apply's copy check. */
+      spokenLines: string[];
+    }
+  | {
+      type: "playbook";
+      channel: { id: string; title: string; handle: string | null };
+      rules: PlaybookRule[];
+      houseStyle: string;
+      notExplained: string[];
+      recipePromptTemplate: string | null;
+      /** Internal only: for apply's copy check. */
+      spokenLines: string[];
+    };
+
+export interface SkillRecord {
+  id: string;
+  userId: string;
+  orgId: string;
+  /** User-written; encrypted at rest like goals. */
+  name: string;
+  source: SkillSource;
+  /** The reference video's or channel's title, for the skills list. */
+  sourceTitle: string | null;
+  snapshot: SkillSnapshot;
+  versions: Record<string, string>;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type SkillPatch = Partial<
+  Pick<SkillRecord, "name" | "snapshot" | "versions" | "sourceTitle" | "lastUsedAt">
+>;
+
+export interface SkillStore {
+  /**
+   * Saves the skill unless the user already has `limit` skills (PRD: 50). Returns false at the
+   * limit. Atomic per user, so two concurrent saves can't both take the last slot.
+   */
+  create(rec: SkillRecord, limit: number): Promise<boolean>;
+  get(id: string): Promise<SkillRecord | null>;
+  /** The user's skills, most recently used (or created) first. */
+  listByUser(userId: string): Promise<SkillRecord[]>;
+  update(id: string, patch: SkillPatch): Promise<SkillRecord | null>;
+  delete(id: string): Promise<void>;
 }

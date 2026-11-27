@@ -67,6 +67,11 @@ export const envSchema = z
     /** Days to keep briefs (PRD: 90). */
     BRIEF_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
     /**
+     * Days to keep playbooks, which hold public YouTube statistics (PRD-playbooks.md: 30 days is
+     * the working assumption until the YouTube API policy's limit is confirmed).
+     */
+    PLAYBOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    /**
      * Match Cut MCP server (/mcp): comma-separated API keys, each at least 24 characters.
      * Each key is its own user. Empty: the MCP server is off.
      */

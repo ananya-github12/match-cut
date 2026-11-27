@@ -331,6 +331,15 @@ Implementation notes (M10.4, for sign-off):
 
 Statuses are v1's. Stages: `resolving_channel`, `fetching_stats`, `scoring`, `watching` (with `progress: {done, total}`), `extracting`, `comparing`, `writing_playbook`, `validating`.
 
+Storage notes (M10.5):
+
+- **What's stored**: the parsed channel reference, never the raw input. Also the settings, the channel, window, baseline, every upload in the window with its public stats and group, the comparison (evidence table, rules, house style, topics, each compared video's features) and the written playbook. The breakouts' spoken lines are stored too (internal only).
+- **Retention**: playbooks hold YouTube statistics, so they're deleted after `PLAYBOOK_RETENTION_DAYS` (default 30, the working assumption above).
+- **`videos[]`**: lists Shorts only. Long uploads are left out (`MIXED_FORMATS` warns about them). Uploads under 7 days old are listed as `other` with a null `outlier_score`; `window.too_new` counts them.
+- **`progress`**: a top-level field, set only during `watching`. `stage` is shown only while the playbook is queued or processing, as for briefs.
+- **`meta`**: `versions` (pass 1, schema, features, comparison, playbook), `models` (pass 1, features, playbook), `cached`, `timings_ms`, `tokens`, `cost_usd`, `created_at`.
+- **`source.mine`** (M11) isn't accepted yet: the request fails validation until own-channel insights are built.
+
 ## Feature 4: Saved skills (M10)
 
 A skill is a named, reusable recipe: either a brief's breakdown or a playbook's rules plus its `recipe_prompt_template`. Applying a skill runs only the text step that writes a prompt and shot list for a new goal, format and length; it never re-watches video.
@@ -339,6 +348,29 @@ A skill is a named, reusable recipe: either a brief's breakdown or a playbook's 
 - Stores the source brief or playbook ID, versions, and a snapshot of the rules, so a skill keeps working after caches expire.
 - Re-running the source playbook updates the skill only on request ("Refresh from channel").
 - Limits: 50 skills per user.
+
+Storage notes (M10.5, for sign-off):
+
+- **Snapshot**: a skill copies what apply needs. For a brief: the video ID, title and breakdown. For a playbook: the channel's ID, title and handle, the rules (with their evidence counts and example moments), house style, "not explained" and the recipe template. It holds no view, like or comment counts, so it isn't YouTube statistics and stays until the user deletes it. The versions behind the source (prompts, schema, features, comparison, playbook) are stored with it.
+- **Internal copy check**: the snapshot also keeps the source's spoken lines (internal, never returned), so apply can still block copied speech after the brief or playbook is gone. Open question below.
+- **Sources**: a brief can become a skill once it has a breakdown (`succeeded` or `partial`). A playbook can once it has `succeeded` with at least one rule; a playbook with no clear pattern has nothing to reuse.
+- **Names** are user-written, so they're encrypted at rest with the goal key, like goals. Trimmed, whitespace collapsed, 1 to 80 characters.
+- **Limit**: the 50-per-user check and the insert run under a per-user lock, so two saves at once can't both take the last slot.
+- **List order**: most recently used first (a skill never used counts from when it was saved).
+
+**Skill object** (drafted in M10.5; the table above doesn't define it)
+
+| Field | Notes |
+| --- | --- |
+| `id`, `name` | |
+| `source` | `type` (`brief` or `playbook`), `id`, `title` (the video's or channel's title) |
+| `last_used_at`, `created_at`, `updated_at` | ISO 8601; `last_used_at` is null until the first apply |
+| `snapshot` | `GET /v1/skills/{id}` and `POST /v1/skills` only. Brief: `video_id`, `video_title`, `breakdown`. Playbook: `channel`, `rules`, `house_style`, `not_explained`, `recipe_prompt_template` |
+| `versions` | Same endpoints only: the versions behind the source |
+
+`GET /v1/skills` returns the list without `snapshot` and `versions`.
+
+`POST /v1/skills` request: `name` (string, 1 to 80 characters after trimming) and `source`, which is either `{ brief_id }` or `{ playbook_id }`.
 
 ## Feature 5: Own-channel insights (M11)
 
@@ -470,6 +502,7 @@ Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook,
 ## Open questions
 
 - [ ] Sign-off on the two changed v1 non-goals.
+- [ ] Skill snapshots keep the source's spoken lines (internal) so apply can block copied speech after the source is deleted. That outlives brief retention (90 days). Keep them, drop them after 90 days (and skip the copy check), or re-derive them on apply?
 - [ ] Is there a reliable Shorts signal in the YouTube API, or is duration the only option?
 - [ ] Should pass 1 answer the first-second features directly (text on screen, face, first words)? The breakdown often doesn't state them, so grounded extraction answers `unknown`. Asking pass 1 changes its schema and cache, so it needs sign-off.
 - [ ] Is subscribers gained available per video in the YouTube Analytics API for Shorts?

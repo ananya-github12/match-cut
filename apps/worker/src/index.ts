@@ -6,6 +6,7 @@ import {
   goalKeyFrom,
   previousKeysFrom,
   PgBriefStore,
+  PgPlaybookStore,
   RateLimiter,
   RedisBriefEvents,
   RedisKV,
@@ -54,6 +55,7 @@ const store = new PgBriefStore(
   goalKeyFrom(env.GOAL_ENCRYPTION_KEY, env.DEV_API_TOKEN),
   previousKeysFrom(env.GOAL_ENCRYPTION_KEY_PREVIOUS),
 );
+const playbookStore = new PgPlaybookStore(db);
 const kv = new SafeKV(new RedisKV(redis, `${env.REDIS_NAMESPACE}:`));
 const log = (msg: string, extra?: Record<string, unknown>) =>
   console.log(JSON.stringify({ level: "info", src: "worker", msg, ...extra }));
@@ -96,12 +98,17 @@ const worker = new Worker<JobData>(BRIEF_QUEUE, (job) => runJob(job.data, deps),
 });
 worker.on("failed", (job, err) => console.error(`[worker] job ${job?.id} crashed: ${err.message}`));
 
-// PRD retention: briefs (and their goal text) are deleted after BRIEF_RETENTION_DAYS.
+// PRD retention: briefs (and their goal text) are deleted after BRIEF_RETENTION_DAYS; playbooks
+// (public YouTube statistics) after PLAYBOOK_RETENTION_DAYS. Saved skills keep only a snapshot of
+// the rules and recipe, with no view counts, so they stay until the user deletes them.
 async function retention() {
   try {
     const cutoff = new Date(Date.now() - env.BRIEF_RETENTION_DAYS * 86400_000);
     const n = await store.deleteOlderThan(cutoff);
     if (n > 0) log("retention: deleted old briefs", { count: n });
+    const pbCutoff = new Date(Date.now() - env.PLAYBOOK_RETENTION_DAYS * 86400_000);
+    const p = await playbookStore.deleteOlderThan(pbCutoff);
+    if (p > 0) log("retention: deleted old playbooks", { count: p });
   } catch (e) {
     console.warn(`[worker] retention run failed: ${(e as Error).message}`);
   }
