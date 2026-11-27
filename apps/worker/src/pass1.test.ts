@@ -44,6 +44,7 @@ function fake(
     writePrompt: base.writePrompt.bind(base),
     repair: vi.fn(async () => repair ?? result(fixture)),
     extractFeatures: base.extractFeatures.bind(base),
+    writePlaybook: base.writePlaybook.bind(base),
   };
 }
 

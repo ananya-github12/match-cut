@@ -3,6 +3,7 @@ import type {
   Breakdown,
   CapabilityManifest,
   Detail,
+  PlaybookFacts,
   TargetFormat,
 } from "@match-cut/core";
 
@@ -52,9 +53,17 @@ export interface ExtractFeaturesInput {
   model: string;
 }
 
+/** Text-only: word a playbook from computed facts (PRD-playbooks.md, Playbook writing). */
+export interface WritePlaybookInput {
+  facts: PlaybookFacts;
+  manifest: CapabilityManifest;
+  language: string;
+  model: string;
+}
+
 export interface RepairInput {
-  /** Which call's output is being repaired: pass 1, pass 2, or playbook features. */
-  pass: 1 | 2 | "features";
+  /** Which call's output is being repaired: pass 1, pass 2, playbook features or writing. */
+  pass: 1 | 2 | "features" | "playbook";
   /** The model's previous output, as text. */
   previousOutput: string;
   /** Plain-English list of failed checks. */
@@ -102,6 +111,12 @@ export interface VideoAnalyzer {
   /** Text-only: a breakdown's edit as playbook features. */
   extractFeatures(
     input: ExtractFeaturesInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult>;
+  /** Text-only: a playbook's wording from computed facts. */
+  writePlaybook(
+    input: WritePlaybookInput,
     signal?: AbortSignal,
     ctx?: CallContext,
   ): Promise<ModelResult>;

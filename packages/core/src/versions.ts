@@ -9,3 +9,5 @@ export const PASS2_PROMPT_VERSION = "p2.v3";
 export const SCHEMA_VERSION = "s1";
 /** Playbook edit features (PRD-playbooks.md, Feature 3 > Feature extraction). */
 export const FEATURES_VERSION = "f1";
+/** Playbook writing prompt, output schema and checks (PRD-playbooks.md, Feature 3). */
+export const PLAYBOOK_VERSION = "pb1";

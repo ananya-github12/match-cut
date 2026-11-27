@@ -3,12 +3,19 @@
  */
 import {
   checkFeatures,
+  checkPass2,
+  checkPlaybook,
   compareFeatures,
+  faithfulnessProblems,
   featureRow,
+  GOAL_SLOT,
   groundFeatures,
+  loadManifest,
+  parseTimecode,
   scoreChannel,
   type Breakdown,
   type ComparedVideo,
+  type PlaybookFacts,
   type ScoredVideo,
   type ScoringResult,
 } from "@match-cut/core";
@@ -77,7 +84,7 @@ describe("edge channels produce their intended results", () => {
   });
 });
 
-const { spoken_lines_internal: _s, ...breakdown } = JSON.parse(
+const { spoken_lines_internal: spokenLines, ...breakdown } = JSON.parse(
   readFileSync(
     new URL("../packages/providers/fixtures/pass1/default.json", import.meta.url),
     "utf8",
@@ -153,5 +160,54 @@ describe("scoring + features + comparison recover each golden channel's planted 
     const result = compareFeatures(await compared(r.outliers), await compared(r.typical));
     expect(result.outlierTopics).toContain("budget");
     expect(result.warnings.map((w) => w.code)).toContain("TOPIC_CONFOUND");
+  });
+});
+
+describe("playbook writing on every golden channel (M10 done-when: faithful playbooks)", () => {
+  it.each(GOLDEN_CHANNEL_HANDLES)("%s", async (handle) => {
+    const r = await score(handle);
+    if (!r.ok) throw new Error("not enough data");
+    const outliers = await compared(r.outliers);
+    const result = compareFeatures(outliers, await compared(r.typical));
+    const facts: PlaybookFacts = {
+      rules: result.rules,
+      houseStyle: result.houseStyle,
+      outlierTopics: result.outlierTopics,
+      outliers: outliers.map((o) => ({
+        videoId: o.videoId,
+        analyzedSeconds: parseTimecode(breakdown.format.duration)!,
+        features: o.features,
+        breakdown,
+        spokenLines,
+      })),
+      avoidNames: [handle],
+    };
+    const written = await new MockAnalyzer().writePlaybook({
+      facts,
+      manifest: loadManifest(),
+      language: "en",
+      model: "mock",
+    });
+    const check = checkPlaybook(written.output, facts);
+    expect(check.problems).toEqual([]);
+    expect(faithfulnessProblems(check.content, facts)).toEqual([]);
+    expect(check.content.rules.length).toBe(result.rules.length);
+    for (const rule of check.content.rules) expect(rule.examples.length).toBeGreaterThan(0);
+    // The channel with a counterexample shows it on its first planted rule.
+    const spec = MOCK_CHANNEL_SPECS.find((x) => x.handle === handle)!;
+    const first = check.content.rules.find(
+      (x) => x.feature === Object.values(spec.pattern!)[0]![0],
+    );
+    if (first && first.evidence.outliers_with < first.evidence.outliers_known) {
+      expect(first.counterexample).not.toBeNull();
+    }
+    // The recipe, filled with a goal, passes v1's prompt checks.
+    const recipe = check.content.recipe_prompt_template!;
+    const filled = recipe.replace(GOAL_SLOT, "a 30-second video about my coffee cart");
+    const v1 = checkPass2(
+      { cardboard_prompt: filled, assets_needed: [], watch_outs: ["-"], shot_list: [] },
+      { spokenLines, language: "en" },
+    );
+    expect(v1.problems.filter((p) => !v1.shotListProblems.includes(p))).toEqual([]);
   });
 });

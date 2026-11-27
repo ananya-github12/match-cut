@@ -41,6 +41,7 @@ const analyzerWith = (over: Partial<VideoAnalyzer>): VideoAnalyzer => ({
   writePrompt: mock.writePrompt.bind(mock),
   repair: mock.repair.bind(mock),
   extractFeatures: mock.extractFeatures.bind(mock),
+  writePlaybook: mock.writePlaybook.bind(mock),
   ...over,
 });
 
@@ -355,5 +356,28 @@ describe("extractFeatures (PRD-playbooks.md) rides the same chain", () => {
     const r = await m.extractFeatures(fx);
     expect(r.output).toEqual({ hook_type: "x" });
     expect(m.calls.map((c) => c.method)).toEqual(["extractFeatures"]);
+  });
+});
+
+describe("writePlaybook (PRD-playbooks.md) rides the same chain", () => {
+  const fx = { facts: {} as never, manifest: {} as never, language: "en", model: "flash" };
+
+  it("an overloaded model falls back like the other calls", async () => {
+    const inner = analyzerWith({
+      writePlaybook: vi
+        .fn()
+        .mockRejectedValueOnce(overloaded())
+        .mockRejectedValueOnce(overloaded())
+        .mockResolvedValue(ok("x")),
+    });
+    const r = await withFallback(inner, { fallbacks: ["flash-old"], ...noSleep }).writePlaybook(fx);
+    expect(r).toMatchObject({ model: "flash-old", fallbackUsed: true });
+  });
+
+  it("mock fault injection works for the new method", async () => {
+    const m = new MockAnalyzer({ faults: { writePlaybook: [{ output: { rules: "x" } }] } });
+    const r = await m.writePlaybook(fx);
+    expect(r.output).toEqual({ rules: "x" });
+    expect(m.calls.map((c) => c.method)).toEqual(["writePlaybook"]);
   });
 });

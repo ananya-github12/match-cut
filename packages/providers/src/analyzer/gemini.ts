@@ -21,6 +21,10 @@ import {
   pass1UserText,
   pass2RepairText,
   pass2UserText,
+  PLAYBOOK_RESPONSE_SCHEMA,
+  PLAYBOOK_SYSTEM_INSTRUCTION,
+  playbookRepairText,
+  playbookUserText,
 } from "@match-cut/core";
 import {
   ApiError,
@@ -38,6 +42,7 @@ import type {
   RetryHint,
   VideoAnalyzer,
   WatchInput,
+  WritePlaybookInput,
   WritePromptInput,
 } from "./types.js";
 
@@ -55,6 +60,8 @@ export interface GeminiAnalyzerOptions {
   pass1TimeoutMs?: number;
   pass2TimeoutMs?: number;
   repairTimeoutMs?: number;
+  /** Playbook writing and its repair: more output than pass 2 (up to 5 rules plus a recipe). */
+  playbookTimeoutMs?: number;
 }
 
 export const PASS1_GENERATION = {
@@ -69,6 +76,15 @@ export const PASS1_GENERATION = {
 export const FEATURES_GENERATION = {
   temperature: 0.1,
   maxOutputTokens: 2048,
+} as const;
+
+/**
+ * Playbook writing: text only, up to 5 rules plus a recipe; a little latitude for wording.
+ * Thinking counts toward the cap.
+ */
+export const PLAYBOOK_GENERATION = {
+  temperature: 0.4,
+  maxOutputTokens: 4096,
 } as const;
 
 /** Pass 2: text only. A little more latitude for wording; thinking counts toward the cap. */
@@ -272,6 +288,7 @@ export class GeminiAnalyzer implements VideoAnalyzer {
   private readonly pass1TimeoutMs: number;
   private readonly pass2TimeoutMs: number;
   private readonly repairTimeoutMs: number;
+  private readonly playbookTimeoutMs: number;
 
   constructor(opts: GeminiAnalyzerOptions) {
     if (!opts.client && !opts.apiKey) throw new Error("GeminiAnalyzer needs an apiKey or a client");
@@ -286,6 +303,7 @@ export class GeminiAnalyzer implements VideoAnalyzer {
     this.pass1TimeoutMs = opts.pass1TimeoutMs ?? 180_000;
     this.pass2TimeoutMs = opts.pass2TimeoutMs ?? 20_000;
     this.repairTimeoutMs = opts.repairTimeoutMs ?? 20_000;
+    this.playbookTimeoutMs = opts.playbookTimeoutMs ?? 45_000;
   }
 
   async watch(
@@ -345,6 +363,12 @@ export class GeminiAnalyzer implements VideoAnalyzer {
         generation: FEATURES_GENERATION,
         schema: FEATURES_RESPONSE_SCHEMA,
       },
+      playbook: {
+        text: playbookRepairText,
+        system: PLAYBOOK_SYSTEM_INSTRUCTION,
+        generation: PLAYBOOK_GENERATION,
+        schema: PLAYBOOK_RESPONSE_SCHEMA,
+      },
     }[input.pass];
     return this.call(
       {
@@ -359,7 +383,12 @@ export class GeminiAnalyzer implements VideoAnalyzer {
           responseJsonSchema: spec.schema,
           thinkingConfig: { thinkingLevel: this.thinkingLevel },
           abortSignal: signal,
-          httpOptions: { timeout: Math.min(this.repairTimeoutMs, ctx.timeoutMs ?? Infinity) },
+          httpOptions: {
+            timeout: Math.min(
+              input.pass === "playbook" ? this.playbookTimeoutMs : this.repairTimeoutMs,
+              ctx.timeoutMs ?? Infinity,
+            ),
+          },
         },
       },
       input.model,
@@ -384,6 +413,31 @@ export class GeminiAnalyzer implements VideoAnalyzer {
           thinkingConfig: { thinkingLevel: this.thinkingLevel },
           abortSignal: signal,
           httpOptions: { timeout: Math.min(this.pass2TimeoutMs, ctx.timeoutMs ?? Infinity) },
+        },
+      },
+      input.model,
+      signal,
+    );
+  }
+
+  async writePlaybook(
+    input: WritePlaybookInput,
+    signal?: AbortSignal,
+    ctx: CallContext = {},
+  ): Promise<ModelResult> {
+    const text = playbookUserText(input.facts, input.manifest, input.language);
+    return this.call(
+      {
+        model: input.model,
+        contents: [{ role: "user", parts: [{ text }] }],
+        config: {
+          systemInstruction: PLAYBOOK_SYSTEM_INSTRUCTION,
+          ...PLAYBOOK_GENERATION,
+          responseMimeType: "application/json",
+          responseJsonSchema: PLAYBOOK_RESPONSE_SCHEMA,
+          thinkingConfig: { thinkingLevel: this.thinkingLevel },
+          abortSignal: signal,
+          httpOptions: { timeout: Math.min(this.playbookTimeoutMs, ctx.timeoutMs ?? Infinity) },
         },
       },
       input.model,

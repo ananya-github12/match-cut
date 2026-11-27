@@ -11,7 +11,13 @@ import {
   PASS1_SYSTEM_INSTRUCTION,
   PASS2_RESPONSE_SCHEMA,
   PASS2_SYSTEM_INSTRUCTION,
+  PLAYBOOK_RESPONSE_SCHEMA,
+  PLAYBOOK_SYSTEM_INSTRUCTION,
+  FEATURE_NAMES,
+  loadManifest,
   type Breakdown,
+  type FeatureRow,
+  type PlaybookFacts,
 } from "@match-cut/core";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -321,5 +327,76 @@ describe("GeminiAnalyzer.extractFeatures (PRD-playbooks.md, Feature extraction)"
     const sent = generateContent.mock.calls[0]![0];
     expect(part(sent)[0]!.text).toContain("hook_type: invalid");
     expect(sent.config?.responseJsonSchema).toBe(FEATURES_RESPONSE_SCHEMA);
+  });
+});
+
+describe("GeminiAnalyzer.writePlaybook (PRD-playbooks.md, Playbook writing)", () => {
+  const features = {
+    ...Object.fromEntries(FEATURE_NAMES.map((f) => [f, "unknown"])),
+    hook_type: "question",
+  } as FeatureRow;
+  const facts: PlaybookFacts = {
+    rules: [
+      {
+        feature: "hook_type",
+        value: "question",
+        outliersWith: 4,
+        outliersKnown: 5,
+        typicalWith: 0,
+        typicalKnown: 5,
+        confidence: "high",
+        difference: 0.8,
+      },
+    ],
+    houseStyle: [],
+    outlierTopics: [],
+    outliers: [
+      {
+        videoId: ID,
+        analyzedSeconds: 30,
+        features,
+        breakdown: fixtureBreakdown,
+        spokenLines: ["a secret spoken line that must stay internal"],
+      },
+    ],
+    avoidNames: ["Some Channel"],
+  };
+
+  it("is text only: delimited facts, the playbook schema, no video, no spoken lines", async () => {
+    const generateContent = vi.fn(async (_p: GenerateContentParameters) =>
+      resp({ text: '{"rules":[]}' }),
+    );
+    const a = new GeminiAnalyzer({ client: { generateContent } });
+    const r = await a.writePlaybook({
+      facts,
+      manifest: loadManifest(),
+      language: "en",
+      model: "m",
+    });
+    const sent = generateContent.mock.calls[0]![0];
+    const text = part(sent)[0]!.text!;
+    expect(text).toContain("<<<FACTS");
+    expect(text).not.toContain("a secret spoken line");
+    expect(text).not.toContain("Some Channel");
+    expect(JSON.stringify(sent.contents)).not.toContain("fileData");
+    expect(sent.config?.responseJsonSchema).toBe(PLAYBOOK_RESPONSE_SCHEMA);
+    expect(sent.config?.systemInstruction).toBe(PLAYBOOK_SYSTEM_INSTRUCTION);
+    expect(sent.config?.temperature).toBe(0.4);
+    expect(sent.config?.httpOptions?.timeout).toBe(45_000);
+    expect(r.output).toEqual({ rules: [] });
+  });
+
+  it("repairs with the playbook schema and the playbook timeout", async () => {
+    const generateContent = vi.fn(async (_p: GenerateContentParameters) => resp());
+    const a = new GeminiAnalyzer({ client: { generateContent } });
+    await a.repair(
+      { pass: "playbook", previousOutput: "{}", problems: ["rules: Required"], model: "m" },
+      undefined,
+      { timeoutMs: 30_000 },
+    );
+    const sent = generateContent.mock.calls[0]![0];
+    expect(part(sent)[0]!.text).toContain("rules: Required");
+    expect(sent.config?.responseJsonSchema).toBe(PLAYBOOK_RESPONSE_SCHEMA);
+    expect(sent.config?.httpOptions?.timeout).toBe(30_000);
   });
 });

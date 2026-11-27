@@ -138,6 +138,10 @@ export const PLAYBOOK_WARNINGS = {
   RECENT_VIDEOS_EXCLUDED:
     "{count} uploads from the last {days} days were left out because they're still gaining views.",
   TOPIC_CONFOUND: "Most breakouts share a topic, so the topic may matter as much as the edit.",
+  RECIPE_UNAVAILABLE:
+    "We couldn't write a ready-made prompt for this playbook. Use Apply to write one for your goal.",
+  NO_CLEAR_PATTERN:
+    "The breakouts don't share an edit choice that the typical videos lack, so there are no rules to copy yet.",
 } as const;
 
 export type PlaybookWarningCode = keyof typeof PLAYBOOK_WARNINGS;

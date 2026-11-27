@@ -21,6 +21,7 @@ import type {
   RetryHint,
   VideoAnalyzer,
   WatchInput,
+  WritePlaybookInput,
   WritePromptInput,
 } from "./types.js";
 
@@ -245,5 +246,7 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
       run(input, (i, s, c) => inner.writePrompt(i, s, c), signal, ctx),
     extractFeatures: (input: ExtractFeaturesInput, signal?: AbortSignal, ctx?: CallContext) =>
       run(input, (i, s, c) => inner.extractFeatures(i, s, c), signal, ctx),
+    writePlaybook: (input: WritePlaybookInput, signal?: AbortSignal, ctx?: CallContext) =>
+      run(input, (i, s, c) => inner.writePlaybook(i, s, c), signal, ctx),
   };
 }

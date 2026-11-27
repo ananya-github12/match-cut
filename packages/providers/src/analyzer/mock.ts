@@ -5,10 +5,18 @@
  */
 import {
   UNKNOWN,
+  countWords,
+  defaultExampleMoment,
+  fallbackCopy,
   formatTimecode,
+  GOAL_SLOT,
+  houseStyleLine,
   MatchCutError,
   targetSeconds,
   type Breakdown,
+  type FeatureName,
+  type PlaybookFacts,
+  type PlaybookOutput,
   type Shot,
 } from "@match-cut/core";
 import { existsSync, readFileSync } from "node:fs";
@@ -23,6 +31,7 @@ import type {
   RepairInput,
   VideoAnalyzer,
   WatchInput,
+  WritePlaybookInput,
   WritePromptInput,
 } from "./types.js";
 
@@ -41,7 +50,7 @@ export type MockFault =
   | { output: unknown; text?: string }; // a specific (possibly invalid) response body
 
 export interface MockCall {
-  method: "watch" | "writePrompt" | "repair" | "extractFeatures";
+  method: "watch" | "writePrompt" | "repair" | "extractFeatures" | "writePlaybook";
   model: string;
   hint?: string;
   timeoutMs?: number;
@@ -212,6 +221,76 @@ export function mockPrompt(input: WritePromptInput): string {
   ].join("\n");
 }
 
+/** Generic recipe steps; a step is skipped when a rule already covers its feature. */
+const MOCK_RECIPE_STEPS: { feature?: FeatureName; text: string }[] = [
+  {
+    text: "Rough cut: keep only my strongest takes, remove silences and pauses longer than 0.3 seconds, and order the points so each one builds on the last.",
+  },
+  {
+    feature: "caption_style",
+    text: "Captions: add clear captions in a bold sans-serif font in the lower third, sized for a phone screen and kept in sync with my voice.",
+  },
+  {
+    feature: "music",
+    text: "Sound: keep my voice clear and even, add a soft whoosh on transitions, and keep any music well below the voice.",
+  },
+  {
+    text: "Color: apply a bright, natural grade so skin tones look warm and consistent from shot to shot.",
+  },
+  {
+    text: "B-roll: if my footage lacks a shot for a point, generate a short b-roll clip that shows it instead of holding on one angle.",
+  },
+  {
+    feature: "ending",
+    text: "Ending: finish on the strongest payoff line and cut hard on the final beat, with no long outro or end card.",
+  },
+  {
+    text: "Review: watch the whole cut once at normal speed and trim any moment where the energy drops or a point repeats.",
+  },
+  {
+    text: "Export: vertical 9:16 at full resolution, with audio levels even from start to finish.",
+  },
+];
+const MOCK_RECIPE_WORDS = 180;
+
+/** A playbook that passes every check: fallback wording, code-valid examples, a 150+ word recipe. */
+export function mockPlaybook(facts: PlaybookFacts): PlaybookOutput {
+  const rules = facts.rules.map((r) => {
+    const carrier = facts.outliers.find((o) => o.features[r.feature] === r.value);
+    const moment = carrier ? defaultExampleMoment(r.feature, carrier) : null;
+    return {
+      feature: r.feature,
+      value: r.value,
+      ...fallbackCopy(r.feature, r.value),
+      examples: carrier && moment ? [{ video_id: carrier.videoId, timestamp: moment }] : [],
+    };
+  });
+  const lines = [`Edit my footage into ${GOAL_SLOT}, following this playbook's rules.`];
+  let step = 1;
+  for (const r of rules) lines.push(`${step++}. ${r.title}: ${r.how_to}`);
+  for (const s of MOCK_RECIPE_STEPS) {
+    if (countWords(lines.join(" ")) >= MOCK_RECIPE_WORDS) break;
+    if (s.feature && rules.some((r) => r.feature === s.feature)) continue;
+    lines.push(`${step++}. ${s.text}`);
+  }
+  return {
+    rules,
+    house_style: facts.houseStyle.length
+      ? houseStyleLine(facts.houseStyle) ||
+        "Nearly every compared video shares the same basic look, so it isn't what sets the breakouts apart."
+      : "",
+    not_explained: [
+      ...(facts.outlierTopics.length
+        ? [
+            `The breakouts share topics (${facts.outlierTopics.slice(0, 3).join(", ")}), so the topic may matter as much as the edit.`,
+          ]
+        : []),
+      "Posting time, trends and the audience also play a part, beyond the edit.",
+    ],
+    recipe_prompt_template: lines.join("\n"),
+  };
+}
+
 export class MockAnalyzer implements VideoAnalyzer {
   /** Every call, in order, for assertions. */
   readonly calls: MockCall[] = [];
@@ -271,6 +350,22 @@ export class MockAnalyzer implements VideoAnalyzer {
     };
   }
 
+  async writePlaybook(
+    input: WritePlaybookInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult> {
+    const faulted = await this.fault("writePlaybook", input.model, signal, ctx);
+    if (faulted) return faulted;
+    const output = mockPlaybook(input.facts);
+    return {
+      output,
+      text: JSON.stringify(output),
+      model: input.model,
+      usage: { inputTokens: 6000, outputTokens: 900 },
+    };
+  }
+
   async writePrompt(
     input: WritePromptInput,
     signal?: AbortSignal,
@@ -305,7 +400,7 @@ export class MockAnalyzer implements VideoAnalyzer {
   async repair(input: RepairInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult> {
     const faulted = await this.fault("repair", input.model, signal, ctx);
     if (faulted) return faulted;
-    if (input.pass === 2 || input.pass === "features") {
+    if (input.pass === 2 || input.pass === "features" || input.pass === "playbook") {
       let output: unknown;
       try {
         output = JSON.parse(input.previousOutput);

@@ -114,11 +114,12 @@ export function longestSharedRun(text: string, lines: string[]): number {
   return best;
 }
 
-const URL_IN_TEXT =
+/** Text checks shared with playbook writing. */
+export const URL_IN_TEXT =
   /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|net|org|io|co|ai|app|dev|ly|be|tv)\b/i;
-const INJECTION =
+export const INJECTION =
   /\b(ignore|disregard|override)\b[^.\n]{0,40}\b(instructions|rules|system prompt|previous)\b|\bsystem prompt\b/i;
-const MARKDOWN_LEFT = /(\*\*|__|^#{1,6}\s|```|\[[^\]]+\]\([^)]+\))/m;
+export const MARKDOWN_LEFT = /(\*\*|__|^#{1,6}\s|```|\[[^\]]+\]\([^)]+\))/m;
 
 export interface Pass2Check {
   /** True when both the prompt and the shot list pass. */

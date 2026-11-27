@@ -257,6 +257,62 @@ Gemini receives only the computed table, kept rules, house style and the outlier
 
 **Validation**: schema check; every `evidence` object must equal the computed counts exactly; every example timestamp must lie within that video's analyzed range; `recipe_prompt_template` passes v1's prompt checks. One repair call on failure, as in v1.
 
+Implementation notes (M10.4, for sign-off):
+
+- **Evidence, confidence and counterexamples come from code.** The model writes only `title`, `how_to`, example moments, `house_style`, `not_explained` and the recipe. `counterexample` is the first breakout (by outlier score) with a different known value for that feature, so it is always real; the model isn't asked for it.
+- **The model never sees the counts.** It gets each rule's feature, value and the IDs of the breakouts that carry it, plus the breakouts' breakdowns, house style and shared topics. No titles, channel name, spoken lines or numbers, so it can't restate or distort them. Wording that states counts, shares or confidence ("4 of 5", "80% of", "high confidence") fails the check; craft numbers ("a 115% zoom") pass.
+- **Every part has a fallback, so a playbook never fails over wording.** After the one repair, a rule whose wording still fails uses the fallback copy below; examples that point at the wrong video or outside its analyzed range are dropped, and code fills up to 2 examples from carriers (the first beat, or the last beat for `ending`); `house_style` and `not_explained` fall back to the code-written lines below; shared topics are always named under `not_explained`. A recipe that still fails becomes `null` with the `RECIPE_UNAVAILABLE` warning; apply still works from the rules.
+- **Other checks**: titles at most 7 words, how-to at most 3 sentences and 70 words, no URLs, markdown, prompt-injection phrasing, channel name or runs of more than 12 words from the breakouts' speech. The recipe must contain `{{GOAL}}` exactly once (`{{ goal }}` is normalized) and pass v1's prompt checks with a placeholder goal.
+- **Zero rules**: when the comparison keeps no rule, there is no writing call; the playbook has no rules, no recipe and the `NO_CLEAR_PATTERN` warning. The table above says "1 to 5" rules; this is the honest result when nothing qualifies.
+- **Faithfulness check** (`faithfulnessProblems`) runs on every playbook: evidence and confidence equal the comparison, examples are real moments of carriers, the counterexample really breaks the rule (and none is hidden), and the recipe has one goal slot.
+
+**Fallback rule wording** (drafted during M10; needs owner sign-off). Used only when the model's wording for a rule fails the checks after the repair. `other` never becomes a rule, so it has no copy.
+
+| Feature = value | Title | How-to |
+| --- | --- | --- |
+| `hook_type` = `question` | Open on a spoken question | Make the first line a question to the viewer, inside the first second, before any title card. |
+| `hook_type` = `bold_claim` | Lead with a bold claim | Open with your strongest statement or promise in the first second, then back it up. |
+| `hook_type` = `result_first` | Show the result first | Open on the finished result, then cut back to show how you got there. |
+| `hook_type` = `visual_surprise` | Open on a visual surprise | Start on an unexpected image or motion in the first second, before any talking. |
+| `hook_type` = `story_open` | Start in the middle of a story | Drop the viewer into a scene already in progress; explain the setup later. |
+| `first_words_timing` = `under_1s` | Speak within the first second | Cut any lead-in so your first word lands in the first second. |
+| `first_words_timing` = `1_to_3s` | Start talking within 3 seconds | Give the opening shot a beat, then start speaking before the 3-second mark. |
+| `first_words_timing` = `over_3s` | Let the visuals breathe first | Hold on visuals or music for a few seconds before the first spoken line. |
+| `first_words_timing` = `no_speech` | Tell it without talking | Carry the video with visuals, text and music; leave out voice. |
+| `text_on_screen_first_second` = `yes` | Put text on screen immediately | Show a short title or caption in the first second that tells viewers what's coming. |
+| `text_on_screen_first_second` = `no` | Keep the first second text-free | Let the opening shot play clean; add titles only after the hook lands. |
+| `face_in_first_shot` = `yes` | Show a face in the first shot | Open on a close-up of a person looking at the camera. |
+| `face_in_first_shot` = `no` | Open on something other than a face | Start on the product, place or action, and bring people in later. |
+| `caption_style` = `word_by_word` | Use word-by-word captions | Caption 1 to 3 words at a time, synced to speech, with the active word highlighted. |
+| `caption_style` = `phrase` | Caption in full phrases | Show captions a phrase or sentence at a time, in a steady position. |
+| `caption_style` = `none` | Skip the captions | Leave speech uncaptioned and let the visuals and voice carry it. |
+| `zoom_punch_ins` = `frequent` | Punch in on most cuts | Add a 110 to 120 percent zoom on most cuts to keep the energy up. |
+| `zoom_punch_ins` = `some` | Punch in now and then | Add a quick zoom on key lines only, every few cuts. |
+| `zoom_punch_ins` = `none` | Keep the frame steady | Avoid zooms; let cuts and framing do the work. |
+| `music` = `trending_or_upbeat` | Use an upbeat track | Put an energetic track under the whole video, low enough that speech stays clear. |
+| `music` = `ambient` | Keep music as a quiet bed | Use soft background music that never competes with the voice. |
+| `music` = `none` | Go without music | Leave out music and let voice and natural sound carry the video. |
+| `ending` = `call_to_action` | End on a clear call to action | Finish with one direct ask, such as follow or try it, and cut right after it. |
+| `ending` = `loop` | Make the ending loop back | End on a shot or line that flows straight back into the opening. |
+| `ending` = `cliffhanger` | End on a cliffhanger | Stop just before the payoff so viewers want the next video. |
+| `ending` = `abrupt` | Cut off sharply at the end | End mid-moment with a hard cut, with no outro. |
+| `avg_shot_length_bucket` = `under_1s` | Cut faster than once a second | Keep most shots under 1 second, cutting on every phrase or beat. |
+| `avg_shot_length_bucket` = `1_to_2s` | Cut every 1 to 2 seconds | Keep shots between 1 and 2 seconds, and remove pauses. |
+| `avg_shot_length_bucket` = `2_to_4s` | Hold shots for 2 to 4 seconds | Let each shot run 2 to 4 seconds; cut on the end of each idea. |
+| `avg_shot_length_bucket` = `over_4s` | Let shots run longer | Hold shots for more than 4 seconds and let moments play out. |
+| `length_bucket` = `under_15s` | Keep it under 15 seconds | Trim to one idea and finish before 15 seconds. |
+| `length_bucket` = `15_to_30s` | Aim for 15 to 30 seconds | Cover one idea with a hook, a middle and a payoff in 15 to 30 seconds. |
+| `length_bucket` = `30_to_60s` | Aim for 30 to 60 seconds | Use the extra time for a few quick steps or examples, keeping the pace up. |
+| `length_bucket` = `over_60s` | Go past a minute | Build a fuller story over more than a minute, with a new beat every few seconds. |
+
+**Code-written lines** (drafted during M10; needs owner sign-off)
+
+| Use | Text |
+| --- | --- |
+| House style, when the model's sentence is missing or fails | Nearly every compared video does this, breakouts or not, so it isn't what sets the breakouts apart: {items}. ({items}: the fallback titles above, lower-cased, joined with "; ") |
+| Shared topics, when the model doesn't name them | Most breakouts share a topic ({topics}), so the topic may matter as much as the edit. |
+| "Not explained", when nothing else is left | Timing, trends and the channel's audience also shape how a video does, beyond the edit. |
+
 **Playbook object (API response)**
 
 | Field | Notes |
@@ -267,7 +323,7 @@ Gemini receives only the computed table, kept rules, house style and the outlier
 | `baseline` | `median_views`, `median_engagement_rate` |
 | `videos[]` | `id`, `title`, `published_at`, `views`, `likes` (null if hidden), `comments`, `outlier_score`, `group` (`outlier`, `typical`, `other`), `brief_id` |
 | `rules[]`, `house_style`, `not_explained`, `recipe_prompt_template` | From playbook writing |
-| `warnings[]` | `{code, message}`: `SMALL_SAMPLE` (3 picks on either side, the minimum), `MIXED_FORMATS` (long uploads in the window), `LIKES_HIDDEN` (a compared video hides likes), `RECENT_VIDEOS_EXCLUDED` (uploads under 7 days old), `TOPIC_CONFOUND` (most outliers share a topic); copy below |
+| `warnings[]` | `{code, message}`: `SMALL_SAMPLE` (3 picks on either side, the minimum), `MIXED_FORMATS` (long uploads in the window), `LIKES_HIDDEN` (a compared video hides likes), `RECENT_VIDEOS_EXCLUDED` (uploads under 7 days old), `TOPIC_CONFOUND` (most outliers share a topic), `RECIPE_UNAVAILABLE` (no recipe passed the checks), `NO_CLEAR_PATTERN` (no rule qualified); copy below |
 | `meta` | Versions, models, timings, tokens, cost, `cached` |
 
 Statuses are v1's. Stages: `resolving_channel`, `fetching_stats`, `scoring`, `watching` (with `progress: {done, total}`), `extracting`, `comparing`, `writing_playbook`, `validating`.
@@ -355,6 +411,8 @@ YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
 | `LIKES_HIDDEN` | Some of the compared videos hide their likes, so their engagement counts comments only. |
 | `RECENT_VIDEOS_EXCLUDED` | {count} uploads from the last {days} days were left out because they're still gaining views. |
 | `TOPIC_CONFOUND` | Most breakouts share a topic, so the topic may matter as much as the edit. |
+| `RECIPE_UNAVAILABLE` | We couldn't write a ready-made prompt for this playbook. Use Apply to write one for your goal. (added in M10.4) |
+| `NO_CLEAR_PATTERN` | The breakouts don't share an edit choice that the typical videos lack, so there are no rules to copy yet. (added in M10.4) |
 
 ## Frontend additions
 
