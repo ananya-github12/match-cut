@@ -140,6 +140,11 @@ export interface PlaybookResponse {
     /** Match Cut's own calculation: views ÷ the channel's median. Null when not eligible. */
     outlier_score: number | null;
     group: PlaybookVideoGroup;
+    /**
+     * In the comparison. A picked breakout or typical video that couldn't be analyzed is false
+     * (VIDEOS_SKIPPED), so the app doesn't count it among the evidence.
+     */
+    compared: boolean;
     /** The pass 1 brief behind a compared video's breakdown, when one was saved. */
     brief_id: string | null;
   }[];

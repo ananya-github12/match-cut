@@ -88,6 +88,7 @@ export function toPlaybookResponse(r: PlaybookRecord): PlaybookResponse {
         comments: v.comments,
         outlier_score: v.group === "too_new" ? null : v.outlierScore,
         group: v.group === "outlier" || v.group === "typical" ? v.group : "other",
+        compared: v.compared,
         brief_id: v.briefId,
       })),
     not_enough_data: r.notEnoughData && {

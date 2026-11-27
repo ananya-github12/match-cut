@@ -82,6 +82,17 @@ export async function watchAndValidate(
       {
         problemsBefore: check.problems,
         problemsAfter: second.problems,
+        repairUsed: true,
+        // The calls still cost tokens: callers that track cost can count them.
+        usage: {
+          model: first.model,
+          tokens,
+          fallbackUsed: (first.fallbackUsed ?? false) || (repaired.fallbackUsed ?? false),
+          upstreamFailures: [
+            ...(first.upstreamFailures ?? []),
+            ...(repaired.upstreamFailures ?? []),
+          ],
+        },
       },
     );
   }

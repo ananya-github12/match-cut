@@ -200,8 +200,12 @@ const opsTimer = setInterval(opsCheck, 5 * 60_000);
 const shutdown = async () => {
   clearInterval(retentionTimer);
   clearInterval(opsTimer);
-  await worker.close();
-  await playbookWorker.close();
+  // Both queues stop taking jobs at once. A playbook can run for minutes, so the wait is bounded:
+  // an unfinished job is picked up again by another worker (stalled), resuming from the caches.
+  await Promise.race([
+    Promise.all([worker.close(), playbookWorker.close()]),
+    new Promise((resolve) => setTimeout(resolve, 20_000)),
+  ]);
   await sql.end({ timeout: 2 });
   for (const r of [connection, redis, sub]) r.disconnect();
   process.exit(0);

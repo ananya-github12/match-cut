@@ -9,6 +9,8 @@ import {
   groundFeatures,
   MatchCutError,
   MODEL_FEATURE_NAMES,
+  MODEL_FEATURES,
+  UNKNOWN,
   type Breakdown,
   type CapabilityManifest,
   type FeatureValues,
@@ -96,13 +98,28 @@ export async function extractAndGround(
   return { values: grounded.values, ungrounded: grounded.ungrounded, repairUsed, usage };
 }
 
-/** A cached features entry, checked before use (the cache is shared and may be stale). */
-export function readCachedFeatures(raw: string | null): FeatureValues | null {
+/** A cached features entry, checked against the allowed values before use (shared, may be stale). */
+export function readCachedFeatures(
+  raw: string | null,
+): { values: FeatureValues; ungrounded: number } | null {
   if (!raw) return null;
   try {
-    const v = (JSON.parse(raw) as { values?: Record<string, unknown> }).values;
-    if (!v || !MODEL_FEATURE_NAMES.every((f) => typeof v[f] === "string")) return null;
-    return v as FeatureValues;
+    const entry = JSON.parse(raw) as { values?: Record<string, unknown>; ungrounded?: unknown };
+    const v = entry.values;
+    const ok =
+      !!v &&
+      MODEL_FEATURE_NAMES.every((f) => {
+        const value = v[f];
+        return (
+          typeof value === "string" &&
+          (value === UNKNOWN || (MODEL_FEATURES[f] as readonly string[]).includes(value))
+        );
+      });
+    if (!ok) return null;
+    return {
+      values: v as FeatureValues,
+      ungrounded: Array.isArray(entry.ungrounded) ? entry.ungrounded.length : 0,
+    };
   } catch {
     return null;
   }
@@ -111,8 +128,10 @@ export function readCachedFeatures(raw: string | null): FeatureValues | null {
 export interface WritingRun {
   check: PlaybookCheck;
   repairUsed: boolean;
-  /** The model's wording failed entirely (or the call did): every part came from code. */
+  /** The writer call itself failed: every part came from code. */
   writerFailed: boolean;
+  /** Why it failed, for logs and alerts (a billing problem is an ALERT). */
+  writerError?: MatchCutError;
   usage: StepUsage[];
 }
 
@@ -135,14 +154,14 @@ export async function writeAndCheck(
     first = await analyzer.writePlaybook(input, signal, ctx);
   } catch (e) {
     if (signal?.aborted) throw e;
-    log("playbook writer failed; using code-written wording", {
-      code: e instanceof MatchCutError ? e.error.code : "INTERNAL",
-    });
+    const writerError = e instanceof MatchCutError ? e : new MatchCutError("INTERNAL");
+    log("playbook writer failed; using code-written wording", { code: writerError.error.code });
     await onWritten();
     return {
       check: checkPlaybook(null, input.facts),
       repairUsed: false,
       writerFailed: true,
+      writerError,
       usage,
     };
   }

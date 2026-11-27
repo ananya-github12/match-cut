@@ -352,7 +352,13 @@ Pipeline notes (M10.6):
   - A finished playbook is cached for 24 hours for any user with the same channel and settings, keyed by the channel, the settings, every version and the models.
   - `force_refresh` refetches stats and skips the feature and playbook caches; the pass 1 cache still applies.
   - Results that used a fallback model, fallback wording or a skipped video are not cached.
-- **One video failing** doesn't sink the playbook: it is left out, and the playbook gets `VIDEOS_SKIPPED`. If that leaves fewer than 3 breakouts or 3 typical videos, the playbook fails with the upstream error, which is retryable: the analysis failed, not the channel.
+- **Failures, per video or passing**:
+  - A problem with one video doesn't sink the playbook. That means invalid output after the repair, blocked content, a video state, or a 4xx from Gemini meaning it can't access the video. The video is left out, the playbook gets `VIDEOS_SKIPPED`, and the video's `compared` is false.
+  - A passing problem fails the playbook at once as retryable (an overload or timeout after the retries and fallbacks, or the YouTube API). The calls still running are stopped. A retry is cheap: finished videos come back from the caches.
+  - If skipped videos leave fewer than 3 breakouts or 3 typical videos, the playbook fails with `INVALID_MODEL_OUTPUT`.
+  - Failures that aren't the user's give back their rate-limit slot, as in v1: `UPSTREAM_*`, `CAPACITY_EXHAUSTED`, `INVALID_MODEL_OUTPUT` and `INTERNAL`.
+- **`videos[].compared`** (added in M10.6) is true for the picked videos that are in the comparison, so the app highlights only the breakouts the evidence counts.
+- **Stored (internal) meta** also records how many videos were skipped, whether the writer failed and whether a fallback model was used. So a degraded playbook isn't served as the 24-hour repeat.
 - **Writer outage**: the playbook still succeeds. Its rules are computed, the wording is the fallback copy, there's no recipe, and it carries `RECIPE_UNAVAILABLE`. `partial` isn't used, because nothing the user asked for is missing except the recipe, which the warning explains.
 - **Faithfulness**: a playbook that fails the check is a bug. It fails with `INTERNAL` and an ALERT log line, rather than show evidence that doesn't match the comparison.
 - **Limits**: a time limit for the whole playbook (`PLAYBOOK_TIMEOUT_SECONDS`, 600) leads to `UPSTREAM_TIMEOUT`. Each model step (each watch, the extraction, the writing) gets v1's job budget. Queue wait over 120 s leads to `CAPACITY_EXHAUSTED`, as for briefs.

@@ -163,6 +163,8 @@ export interface PlaybookVideo {
   outlierScore: number | null;
   engagementRate: number | null;
   group: VideoGroup;
+  /** In the comparison: a picked outlier or typical video that was analyzed. */
+  compared: boolean;
   /** The brief holding a compared video's breakdown, when one was saved. */
   briefId: string | null;
 }
@@ -199,9 +201,16 @@ export interface PlaybookMeta {
   costUsd?: number;
   /** Feature answers that had no real quote and became "unknown". */
   ungrounded?: number;
-  /** The writer's output needed the repair call / still needed fallbacks after it. */
+  /** A model step needed its repair call. */
   repairUsed?: boolean;
+  /** Some wording came from fallback copy (the writer failed, or its output still failed). */
   fallbacksUsed?: boolean;
+  /** The writer call itself failed: every word came from code and there's no recipe. */
+  writerFailed?: boolean;
+  /** A fallback model produced some step's output. */
+  fallbackModelUsed?: boolean;
+  /** Picked videos left out because they couldn't be analyzed. */
+  skipped?: number;
   lastErrorCode?: string;
   failure?: BriefMeta["failure"];
   upstreamFailures?: BriefMeta["upstreamFailures"];

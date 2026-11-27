@@ -381,3 +381,123 @@ describe("playbook job: failures (PRD error codes)", () => {
     expect(s.analyzer.calls).toEqual([]);
   });
 });
+
+describe("playbook job: review fixes (M10.6)", () => {
+  it("a passing failure fails fast as retryable, stops the other calls, and refunds", async () => {
+    const refund = vi.fn(async () => {});
+    const s = setup({ faults: { watch: [{ status: 503 }] }, deps: { refund } });
+    const pb = await run(s, "mockgolden06");
+    expect(pb).toMatchObject({
+      status: "failed",
+      error: { code: "UPSTREAM_ERROR", retryable: true },
+    });
+    expect(calls(s, "watch")).toBeLessThan(10);
+    expect(refund).toHaveBeenCalledTimes(1);
+  });
+
+  it("no refund when the failure is about the user's input", async () => {
+    const refund = vi.fn(async () => {});
+    const s = setup({ deps: { refund } });
+    await run(s, "mockgone");
+    await run(s, "mocktiny");
+    expect(refund).not.toHaveBeenCalled();
+  });
+
+  it("a failed progress write doesn't fail the playbook", async () => {
+    const s = setup();
+    const update = s.store.update.bind(s.store);
+    let failedOnce = false;
+    s.store.update = async (id, patch, opts) => {
+      if (!failedOnce && patch.progress && patch.progress.done === 3 && !patch.stage) {
+        failedOnce = true;
+        throw new Error("database blip");
+      }
+      return update(id, patch, opts);
+    };
+    const pb = await run(s, "mockgolden06");
+    expect(failedOnce).toBe(true);
+    expect(pb.status).toBe("succeeded");
+  });
+
+  it("marks which videos were compared; a skipped pick isn't", async () => {
+    const s = setup({ faults: { watch: [{ status: 400 }] } });
+    const pb = await run(s, "mockgolden06");
+    const picks = pb.videos.filter((v) => v.group === "outlier" || v.group === "typical");
+    expect(picks.filter((v) => v.compared)).toHaveLength(9);
+    expect(picks.filter((v) => !v.compared)).toHaveLength(1);
+    expect(pb.meta.skipped).toBe(1);
+    expect(pb.videos.filter((v) => v.group === "other").every((v) => !v.compared)).toBe(true);
+  });
+
+  it("damaged cache entries are misses, not failures", async () => {
+    const kv = new MemoryKV(() => NOW);
+    await run(setup({ kv }), "mockgolden04");
+    for (const [key, entry] of kv.data) {
+      if (key.startsWith("p1:")) entry.value = "{not json";
+      if (key.startsWith("feat:"))
+        entry.value = JSON.stringify({ values: { hook_type: "clickbait" } });
+      if (key.startsWith("pb:")) entry.value = JSON.stringify({ channel: { id: "x" } });
+    }
+    const s = setup({ kv });
+    const pb = await run(s, "mockgolden04", { userId: "user_2" });
+    expect(pb.status).toBe("succeeded");
+    expect(pb.meta.cached).toBe(false);
+    expect(calls(s, "watch")).toBe(9);
+    expect(calls(s, "extractFeatures")).toBe(9);
+  });
+
+  it("results from a fallback model aren't cached at any layer", async () => {
+    const s = setup();
+    const extract = s.analyzer.extractFeatures.bind(s.analyzer);
+    s.analyzer.extractFeatures = async (...args) => ({
+      ...(await extract(...args)),
+      fallbackUsed: true,
+    });
+    const pb = await run(s, "mockgolden04");
+    expect(pb.meta.fallbackModelUsed).toBe(true);
+    const keys = [...s.kv.data.keys()];
+    expect(keys.some((k) => k.startsWith("feat:"))).toBe(false);
+    expect(keys.some((k) => k.startsWith("pb:"))).toBe(false);
+    expect(keys.some((k) => k.startsWith("p1:"))).toBe(true);
+  });
+
+  it("a resumed job keeps what the crashed run already spent", async () => {
+    const s = setup();
+    const pb = await run(s, "mockgolden01", {
+      status: "processing",
+      meta: {
+        models: {},
+        versions: {},
+        cached: false,
+        timingsMs: { watching: 5000 },
+        tokens: { pass1_input: 7 },
+        costUsd: 1.5,
+      },
+    });
+    expect(pb.status).toBe("succeeded");
+    expect(pb.meta.costUsd).toBeGreaterThan(1.5);
+    expect(pb.meta.tokens.pass1_input).toBeGreaterThan(7);
+    expect(pb.meta.timingsMs.watching).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("counts the tokens of a video whose output stayed invalid", async () => {
+    const s = setup();
+    const watch = s.analyzer.watch.bind(s.analyzer);
+    const repair = s.analyzer.repair.bind(s.analyzer);
+    let bad = 1;
+    s.analyzer.watch = async (input, signal, ctx) =>
+      bad-- > 0
+        ? { output: {}, model: input.model, usage: { inputTokens: 1234, outputTokens: 5 } }
+        : watch(input, signal, ctx);
+    s.analyzer.repair = async (input, signal, ctx) =>
+      input.pass === 1
+        ? { output: {}, model: input.model, usage: { inputTokens: 100, outputTokens: 5 } }
+        : repair(input, signal, ctx);
+    const pb = await run(s, "mockgolden06");
+    expect(pb.status).toBe("succeeded");
+    expect(pb.meta.skipped).toBe(1);
+    expect(pb.meta.repairUsed).toBe(true);
+    // 9 good watches at 18,000 input tokens each, plus the failed watch and its repair.
+    expect(pb.meta.tokens.pass1_input).toBe(9 * 18_000 + 1234 + 100);
+  });
+});

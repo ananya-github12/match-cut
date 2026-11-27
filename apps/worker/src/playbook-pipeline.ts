@@ -4,9 +4,11 @@
  * at most 3 at a time), extract features (text), compare (code), write the playbook (text),
  * validate, save. Numbers come from code; every playbook passes the faithfulness check or fails.
  *
- * A job restarted after a worker crash starts again from the top: finished videos come back from
- * the pass 1 and feature caches, so it resumes cheaply. Every write is conditional on the
- * playbook still running, so a cancel always wins.
+ * Failures: a problem with one video (bad output, a video Gemini can't access) leaves that video
+ * out. A passing problem (overload, timeout) fails the playbook as retryable at once and stops
+ * the other calls: a retry is cheap, since finished videos come back from the pass 1 and feature
+ * caches. That's also how a job restarted after a worker crash resumes. Every write is
+ * conditional on the playbook still running, so a cancel always wins.
  */
 import {
   apiError,
@@ -43,6 +45,7 @@ import {
   type FeatureRow,
   type ModelNames,
   type Pass1Output,
+  type PlaybookContent,
   type PlaybookFacts,
   type PlaybookStage,
   type PlaybookWarning,
@@ -86,9 +89,9 @@ export interface PlaybookPipelineDeps {
   analyzer: VideoAnalyzer;
   manifest: CapabilityManifest;
   models: ModelNames;
-  /** Budget per model step (each watch, extraction, the writing), as a brief's job budget. */
+  /** Budget per model step (each watch, each extraction, the writing), as a brief's job budget. */
   budget?: { maxFailedAttempts: number; timeoutMs: number };
-  /** The whole playbook. Default 600 s. */
+  /** The whole playbook. Default 600 s. Step budgets never run past it. */
   timeoutMs?: number;
   /** PRD: at most 3 concurrent pass 1 calls per playbook. */
   watchConcurrency?: number;
@@ -96,14 +99,58 @@ export interface PlaybookPipelineDeps {
   queueMaxWaitMs?: number;
   pricing?: Pricing;
   spend?: SpendTracker;
+  /**
+   * PRD: failed jobs aren't billed to user quotas. Called when a playbook fails for a reason
+   * that isn't the user's (the API wires it to the rate limiter).
+   */
+  refund?: (pb: PlaybookRecord) => Promise<void>;
   now?: () => number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
+/** Abort reasons. */
 class Cancelled extends Error {}
 class TimedOut extends Error {}
+class StepFailed extends Error {
+  constructor(readonly cause: MatchCutError) {
+    super(cause.message);
+  }
+}
+class JobEnded extends Error {}
 
 const RUNNING = ["queued", "processing"] as const;
+
+/** Failures that aren't the user's: their rate-limit slot is given back (as v1). */
+const NOT_USERS_FAULT = new Set([
+  "UPSTREAM_ERROR",
+  "UPSTREAM_TIMEOUT",
+  "CAPACITY_EXHAUSTED",
+  "INVALID_MODEL_OUTPUT",
+  "INTERNAL",
+]);
+
+/** Problems with one video, not with the service: that video is left out. */
+const PER_VIDEO_CODES = new Set([
+  "INVALID_MODEL_OUTPUT",
+  "CONTENT_BLOCKED",
+  "NO_ANALYZABLE_CONTENT",
+  "VIDEO_NOT_FOUND",
+  "VIDEO_NOT_PUBLIC",
+  "VIDEO_RESTRICTED",
+  "LIVE_NOT_SUPPORTED",
+  "VIDEO_TOO_LONG",
+]);
+
+export function isPerVideoFailure(e: unknown): boolean {
+  return (
+    e instanceof MatchCutError &&
+    // A 4xx from Gemini (other than quota) means it can't access this video.
+    (PER_VIDEO_CODES.has(e.error.code) || e.detail?.clientError === true)
+  );
+}
+
+const asMatchCut = (e: unknown) =>
+  e instanceof MatchCutError ? e : new MatchCutError("INTERNAL", {}, { err: String(e) });
 
 /** What the 24-hour playbook cache holds: everything but the request, owner and meta. */
 type CachedPlaybook = Pick<
@@ -144,6 +191,7 @@ function toPlaybookVideo(v: ScoredVideo): PlaybookVideo {
     outlierScore: v.outlierScore,
     engagementRate: v.engagementRate,
     group: v.group,
+    compared: false,
     // Compared videos' breakdowns live in the shared pass 1 cache, not in a brief (M10.6).
     briefId: null,
   };
@@ -155,13 +203,32 @@ function addWarnings(into: PlaybookWarning[], more: PlaybookWarning[]): Playbook
   return out;
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** A cached playbook, checked field by field before it's served as someone's result. */
 function readCachedPlaybook(raw: string | null): CachedPlaybook | null {
   if (!raw) return null;
   try {
-    const p = JSON.parse(raw) as CachedPlaybook;
-    return p.channel && p.content && Array.isArray(p.videos) && Array.isArray(p.warnings)
-      ? p
-      : null;
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    const content = p.content as Record<string, unknown> | undefined;
+    const comparison = p.comparison as Record<string, unknown> | undefined;
+    const ok =
+      isObj(p.channel) &&
+      typeof p.channel.id === "string" &&
+      isObj(p.window) &&
+      isObj(p.baseline) &&
+      Array.isArray(p.videos) &&
+      isObj(comparison) &&
+      Array.isArray(comparison.rules) &&
+      Array.isArray(comparison.table) &&
+      isObj(content) &&
+      Array.isArray(content.rules) &&
+      typeof content.house_style === "string" &&
+      Array.isArray(content.not_explained) &&
+      Array.isArray(p.spokenLines) &&
+      Array.isArray(p.warnings);
+    return ok ? (p as unknown as CachedPlaybook) : null;
   } catch {
     return null;
   }
@@ -181,12 +248,15 @@ export async function runPlaybookJob(
   const resumed = initial.status === "processing";
   const settings = pb.settings;
 
+  // A resumed job keeps what the crashed run already spent and measured.
+  const prev = resumed ? pb.meta : undefined;
   const startedAt = now();
-  const timings: Record<string, number> = {};
-  const tokens: Record<string, number> = {};
+  const deadlineAt = startedAt + (deps.timeoutMs ?? 600_000);
+  const timings: Record<string, number> = { ...(prev?.timingsMs ?? {}) };
+  const tokens: Record<string, number> = { ...(prev?.tokens ?? {}) };
+  let cost = prev?.costUsd ?? 0;
+  const upstreamFailures: UpstreamFailure[] = [...(prev?.upstreamFailures ?? [])];
   if (!resumed) timings.queue_wait = startedAt - pb.createdAt.getTime();
-  let cost = 0;
-  const upstreamFailures: UpstreamFailure[] = [];
   const models = {
     pass1: deps.models.standard,
     features: deps.models.pass2,
@@ -200,22 +270,22 @@ export async function runPlaybookJob(
     playbook: PLAYBOOK_VERSION,
     manifest: deps.manifest.manifest_version,
   };
+  // Each step gets v1's job budget, but never more time than the playbook has left.
   const stepBudget = () =>
     new JobBudget({
       maxFailedAttempts: deps.budget?.maxFailedAttempts ?? 4,
-      timeoutMs: deps.budget?.timeoutMs ?? 240_000,
+      timeoutMs: Math.max(1, Math.min(deps.budget?.timeoutMs ?? 240_000, deadlineAt - now())),
       now,
     });
 
-  // Cancel aborts in-flight calls at once; so does the whole-playbook time limit.
+  // Cancel, the time limit and a failed step abort every in-flight call at once.
   const controller = new AbortController();
   const signal = controller.signal;
-  const deadline = setTimeout(() => controller.abort(new TimedOut()), deps.timeoutMs ?? 600_000);
-  const unsubscribe = await events.subscribe(pb.id, () => {
-    void store.get(pb.id).then((p) => {
-      if (!p || p.status === "cancelled") controller.abort(new Cancelled());
-    });
-  });
+  const abort = (reason: Error) => {
+    if (!signal.aborted) controller.abort(reason);
+  };
+  const deadline = setTimeout(() => abort(new TimedOut()), deadlineAt - now());
+  let unsubscribe: (() => Promise<void>) | undefined;
   const stopIfAborted = () => {
     if (signal.aborted) throw signal.reason;
   };
@@ -237,16 +307,27 @@ export async function runPlaybookJob(
       timings[name] = (timings[name] ?? 0) + (now() - t);
     }
   };
-  let anyFallbackModel = false;
+  let fallbackModelUsed = false;
   const account = async (step: string, u: StepUsage) => {
     tokens[`${step}_input`] = (tokens[`${step}_input`] ?? 0) + u.tokens.input;
     tokens[`${step}_output`] = (tokens[`${step}_output`] ?? 0) + u.tokens.output;
     upstreamFailures.push(...u.upstreamFailures);
-    if (u.fallbackUsed) anyFallbackModel = true;
+    if (u.fallbackUsed) fallbackModelUsed = true;
     if (!deps.pricing) return;
     const usd = costUsd(deps.pricing, u.model, u.tokens);
     cost += usd;
     await deps.spend?.add(usd);
+  };
+  /** Counts what a failed step spent, when its error carries usage. */
+  const accountFailure = async (step: string, e: unknown) => {
+    const detail = e instanceof MatchCutError ? e.detail : undefined;
+    const usage = detail?.usage;
+    for (const u of Array.isArray(usage) ? usage : usage ? [usage] : []) {
+      await account(step, u as StepUsage);
+    }
+    if (Array.isArray(detail?.failures)) {
+      upstreamFailures.push(...(detail.failures as UpstreamFailure[]));
+    }
   };
 
   let outcome = "succeeded";
@@ -257,8 +338,38 @@ export async function runPlaybookJob(
   let ungrounded = 0;
   let repairUsed = false;
   let fallbacksUsed = false;
+  let writerFailed = false;
+
+  /** A video failed. Per-video problems leave it out; anything else fails the whole playbook. */
+  const videoFailed = async (step: "watching" | "extracting", videoId: string, e: unknown) => {
+    if (signal.aborted) throw signal.reason;
+    // Tokens are counted per model step, as for successful calls.
+    await accountFailure(step === "watching" ? "pass1" : "features", e);
+    if (e instanceof MatchCutError && e.detail?.repairUsed) repairUsed = true;
+    if (!isPerVideoFailure(e)) {
+      abort(new StepFailed(asMatchCut(e)));
+      throw signal.reason;
+    }
+    log("playbook video skipped", {
+      playbookId: pb.id,
+      videoId,
+      step,
+      code: asMatchCut(e).error.code,
+    });
+  };
 
   try {
+    unsubscribe = await events.subscribe(pb.id, () => {
+      void store
+        .get(pb.id)
+        .then((p) => {
+          if (!p || p.status === "cancelled") abort(new Cancelled());
+        })
+        // A database blip here must never become an unhandled rejection (it would end the
+        // worker process, briefs included). The next write notices a cancel anyway.
+        .catch(() => {});
+    });
+
     if (!resumed && timings.queue_wait! > (deps.queueMaxWaitMs ?? 120_000)) {
       throw new MatchCutError("CAPACITY_EXHAUSTED", {}, { reason: "queue_wait" });
     }
@@ -286,14 +397,23 @@ export async function runPlaybookJob(
     const hit = pb.forceRefresh ? null : readCachedPlaybook(await kv.get(pbKey));
     if (hit) {
       cached = true;
-      timings.total = now() - startedAt;
+      timings.total = (timings.total ?? 0) + (now() - startedAt);
       await save({
         ...hit,
         status: "succeeded",
         stage: null,
         progress: null,
+        notEnoughData: null,
         error: null,
-        meta: { models, versions, cached: true, timingsMs: timings, tokens, costUsd: 0 },
+        meta: {
+          models,
+          versions,
+          cached: true,
+          timingsMs: timings,
+          tokens,
+          costUsd: cost,
+          skipped: 0,
+        },
       });
       return;
     }
@@ -330,11 +450,13 @@ export async function runPlaybookJob(
       });
       throw new MatchCutError("NOT_ENOUGH_DATA", {}, { reasons: scored.reasons });
     }
+    // Warnings start fresh here, so a resumed run can't keep a stale one.
     await save({
       window: scored.window,
       baseline: scored.baseline,
+      notEnoughData: null,
       videos: scored.videos.map(toPlaybookVideo),
-      warnings: addWarnings(pb.warnings, scored.warnings),
+      warnings: scored.warnings,
     });
 
     // ---------- 4. Watch each pick (pass 1, shared cache) ----------
@@ -344,17 +466,21 @@ export async function runPlaybookJob(
     ];
     picked = picks.length;
     let done = 0;
+    // Progress is best effort and serialized: a failed write never fails the playbook, and a
+    // slower write never puts an older count over a newer one. Only a cancel stops the job.
     let progressChain: Promise<void> = Promise.resolve();
     const progressed = () => {
       done++;
-      // Serialized, so a slower write can't put an older count over a newer one.
-      progressChain = progressChain.then(() => save({ progress: { done, total: picks.length } }));
-      return progressChain;
+      progressChain = progressChain
+        .then(() => (signal.aborted ? undefined : save({ progress: { done, total: picked } })))
+        .catch((e: unknown) => {
+          if (e instanceof Cancelled) abort(e);
+        });
     };
-    const failures: MatchCutError[] = [];
-    await stage("watching", { progress: { done: 0, total: picks.length } });
+    await stage("watching", { progress: { done: 0, total: picked } });
     const watched = await timed("watching", () =>
       mapLimit(picks, deps.watchConcurrency ?? 3, async ({ video, group }) => {
+        stopIfAborted();
         const pass1Key = pass1CacheKey({
           videoId: video.id,
           range: null,
@@ -364,11 +490,16 @@ export async function runPlaybookJob(
         });
         try {
           // PRD: force_refresh skips feature and playbook caches; the pass 1 cache still applies.
+          // A damaged entry is a miss, not a failed video.
           const raw = await kv.get(pass1Key);
-          const fromCache = raw ? pass1OutputSchema.safeParse(JSON.parse(raw)) : null;
-          if (fromCache?.success) {
-            return { video, group, output: fromCache.data, pass1Key } satisfies Watched;
+          let fromCache: Pass1Output | null = null;
+          try {
+            const parsed = raw ? pass1OutputSchema.safeParse(JSON.parse(raw)) : null;
+            fromCache = parsed?.success ? parsed.data : null;
+          } catch {
+            fromCache = null;
           }
+          if (fromCache) return { video, group, output: fromCache, pass1Key } satisfies Watched;
           const run = await watchAndValidate(
             analyzer,
             {
@@ -396,28 +527,21 @@ export async function runPlaybookJob(
           }
           return { video, group, output: run.output, pass1Key } satisfies Watched;
         } catch (e) {
-          if (signal.aborted) throw signal.reason;
-          // One video failing doesn't sink the playbook; too many does (checked below).
-          failures.push(e instanceof MatchCutError ? e : new MatchCutError("INTERNAL"));
-          log("playbook video skipped", {
-            playbookId: pb.id,
-            videoId: video.id,
-            step: "watching",
-            code: e instanceof MatchCutError ? e.error.code : "INTERNAL",
-          });
+          await videoFailed("watching", video.id, e);
           return null;
         } finally {
-          if (!signal.aborted) await progressed();
+          if (!signal.aborted) progressed();
         }
       }),
     );
     await progressChain;
+    stopIfAborted();
 
     // ---------- 5. Features (text, cached per breakdown) ----------
     await stage("extracting");
-    const extractBudget = stepBudget();
     const rows = await timed("extracting", () =>
       mapLimit(watched, deps.watchConcurrency ?? 3, async (w) => {
+        stopIfAborted();
         if (!w) return null;
         const { spoken_lines_internal: _spoken, ...breakdown } = w.output;
         const fKey = featuresCacheKey(w.pass1Key, {
@@ -426,41 +550,30 @@ export async function runPlaybookJob(
         });
         try {
           const fromCache = pb.forceRefresh ? null : readCachedFeatures(await kv.get(fKey));
-          let values = fromCache;
-          if (!values) {
-            const run = await extractAndGround(
-              analyzer,
-              { videoId: w.video.id, breakdown, model: models.features },
-              signal,
-              { budget: extractBudget },
+          if (fromCache) {
+            ungrounded += fromCache.ungrounded;
+            return featureRow(fromCache.values, breakdown, w.video.durationSeconds);
+          }
+          const run = await extractAndGround(
+            analyzer,
+            { videoId: w.video.id, breakdown, model: models.features },
+            signal,
+            // One budget per video, so one bad video can't use up the others' retries.
+            { budget: stepBudget() },
+          );
+          for (const u of run.usage) await account("features", u);
+          if (run.repairUsed) repairUsed = true;
+          ungrounded += run.ungrounded.length;
+          if (!run.usage.some((u) => u.fallbackUsed)) {
+            await kv.set(
+              fKey,
+              JSON.stringify({ values: run.values, ungrounded: run.ungrounded }),
+              FEATURES_TTL_SECONDS,
             );
-            for (const u of run.usage) await account("features", u);
-            if (run.repairUsed) repairUsed = true;
-            ungrounded += run.ungrounded.length;
-            values = run.values;
-            if (!run.usage.some((u) => u.fallbackUsed)) {
-              await kv.set(
-                fKey,
-                JSON.stringify({ values, ungrounded: run.ungrounded }),
-                FEATURES_TTL_SECONDS,
-              );
-            }
           }
-          return featureRow(values, breakdown, w.video.durationSeconds);
+          return featureRow(run.values, breakdown, w.video.durationSeconds);
         } catch (e) {
-          if (signal.aborted) throw signal.reason;
-          const detail = e instanceof MatchCutError ? e.detail : undefined;
-          if (Array.isArray(detail?.usage)) {
-            for (const u of detail.usage as StepUsage[]) await account("features", u);
-          }
-          if (detail?.repairUsed) repairUsed = true;
-          failures.push(e instanceof MatchCutError ? e : new MatchCutError("INTERNAL"));
-          log("playbook video skipped", {
-            playbookId: pb.id,
-            videoId: w.video.id,
-            step: "extracting",
-            code: e instanceof MatchCutError ? e.error.code : "INTERNAL",
-          });
+          await videoFailed("extracting", w.video.id, e);
           return null;
         }
       }),
@@ -471,11 +584,12 @@ export async function runPlaybookJob(
     );
     const outliers = usable.filter((u) => u.group === "outlier");
     const typical = usable.filter((u) => u.group === "typical");
-    skipped = picks.length - usable.length;
+    skipped = picked - usable.length;
     if (outliers.length < MIN_OUTLIERS || typical.length < MIN_TYPICAL) {
-      // Not the channel's fault: the analysis failed. Report the upstream error (retryable).
-      throw failures.at(-1) ?? new MatchCutError("UPSTREAM_ERROR");
+      // Only per-video problems get here (passing ones failed the job already).
+      throw new MatchCutError("INVALID_MODEL_OUTPUT", {}, { reason: "too_few_analyzed", skipped });
     }
+    const comparedIds = new Set(usable.map((u) => u.video.id));
     const extra: PlaybookWarning[] = [];
     if (skipped > 0) extra.push(playbookWarning("VIDEOS_SKIPPED", { count: skipped }));
     if (outliers.length < SMALL_SAMPLE_PICKS || typical.length < SMALL_SAMPLE_PICKS) {
@@ -483,7 +597,9 @@ export async function runPlaybookJob(
     }
 
     // ---------- 6. Compare (code) ----------
-    await stage("comparing");
+    await stage("comparing", {
+      videos: pb.videos.map((v) => ({ ...v, compared: comparedIds.has(v.id) })),
+    });
     const asCompared = (list: typeof usable): ComparedVideo[] =>
       list.map((u) => ({ videoId: u.video.id, title: u.video.title, features: u.features }));
     const result = compareFeatures(asCompared(outliers), asCompared(typical));
@@ -510,7 +626,7 @@ export async function runPlaybookJob(
     if (factIssues.length) {
       throw new MatchCutError("INTERNAL", {}, { step: "facts", problems: factIssues });
     }
-    let content;
+    let content: PlaybookContent;
     if (needsPlaybookWriting(facts)) {
       const run = await timed("writing_playbook", () =>
         writeAndCheck(
@@ -523,7 +639,14 @@ export async function runPlaybookJob(
         ),
       );
       for (const u of run.usage) await account("playbook", u);
+      if (run.writerError) {
+        await accountFailure("playbook", run.writerError);
+        if (run.writerError.detail?.billing) {
+          log("ALERT: Gemini billing problem; every model is refusing requests", {});
+        }
+      }
       if (run.repairUsed) repairUsed = true;
+      writerFailed = run.writerFailed;
       fallbacksUsed = run.writerFailed || !run.check.ok;
       content = run.check.content;
     } else {
@@ -552,7 +675,7 @@ export async function runPlaybookJob(
     };
     const warnings = addWarnings(pb.warnings, [...extra, ...result.warnings, ...contentWarnings]);
     const spokenLines = outliers.flatMap((u) => u.output.spoken_lines_internal);
-    timings.total = now() - startedAt;
+    timings.total = (timings.total ?? 0) + (now() - startedAt);
     await save({
       status: "succeeded",
       stage: null,
@@ -572,11 +695,14 @@ export async function runPlaybookJob(
         ungrounded,
         repairUsed,
         fallbacksUsed,
+        writerFailed,
+        fallbackModelUsed,
+        skipped,
         upstreamFailures,
       },
     });
-    // Shared for 24 hours, unless a fallback model or fallback wording made it.
-    if (!anyFallbackModel && !fallbacksUsed && skipped === 0) {
+    // Shared for 24 hours, unless a fallback model, fallback wording or a skipped video made it.
+    if (!fallbackModelUsed && !fallbacksUsed && skipped === 0) {
       const toCache: CachedPlaybook = {
         channel: pb.channel,
         window: pb.window,
@@ -587,7 +713,11 @@ export async function runPlaybookJob(
         spokenLines,
         warnings,
       };
-      await kv.set(pbKey, JSON.stringify(toCache), PLAYBOOK_TTL_SECONDS);
+      try {
+        await kv.set(pbKey, JSON.stringify(toCache), PLAYBOOK_TTL_SECONDS);
+      } catch (e) {
+        log("playbook cache write failed", { playbookId: pb.id, err: String(e) });
+      }
     }
   } catch (caught) {
     const reason = signal.aborted ? signal.reason : caught;
@@ -595,17 +725,21 @@ export async function runPlaybookJob(
       outcome = "cancelled";
       return;
     }
-    let err = reason;
+    let err: unknown = reason;
     if (reason instanceof TimedOut) {
       err = new MatchCutError("UPSTREAM_TIMEOUT", {}, { reason: "playbook_timeout" });
+    } else if (reason instanceof StepFailed) {
+      err = reason.cause;
     } else if (!(err instanceof MatchCutError)) {
       log("unexpected playbook pipeline error", { playbookId: pb.id, err: String(err) });
     }
+    // Stop anything still running before writing the failure.
+    abort(new JobEnded());
     const error: ApiError = err instanceof MatchCutError ? err.error : apiError("INTERNAL");
     const detail = (err instanceof MatchCutError ? err.detail : undefined) ?? {};
     errorCode = error.code;
     outcome = "failed";
-    timings.total = now() - startedAt;
+    timings.total = (timings.total ?? 0) + (now() - startedAt);
     if (Array.isArray(detail.failures)) {
       upstreamFailures.push(...(detail.failures as UpstreamFailure[]));
     }
@@ -615,33 +749,42 @@ export async function runPlaybookJob(
       ...(typeof detail.finishReason === "string" ? { finishReason: detail.finishReason } : {}),
       ...(typeof detail.attempts === "number" ? { attempts: detail.attempts } : {}),
     };
-    const failed = await store.update(
-      pb.id,
-      {
-        status: "failed",
-        stage: null,
-        progress: null,
-        error,
-        meta: {
-          ...pb.meta,
-          models,
-          versions,
-          timingsMs: timings,
-          tokens,
-          costUsd: cost,
-          upstreamFailures,
-          lastErrorCode: error.code,
-          failure,
+    try {
+      const failed = await store.update(
+        pb.id,
+        {
+          status: "failed",
+          stage: null,
+          progress: null,
+          error,
+          meta: {
+            ...pb.meta,
+            models,
+            versions,
+            timingsMs: timings,
+            tokens,
+            costUsd: cost,
+            skipped,
+            upstreamFailures,
+            lastErrorCode: error.code,
+            failure,
+          },
         },
-      },
-      { onlyIfStatus: RUNNING },
-    );
-    if (!failed) outcome = "cancelled";
-    else await events.publish(pb.id);
+        { onlyIfStatus: RUNNING },
+      );
+      if (!failed) outcome = "cancelled";
+      else {
+        await events.publish(pb.id);
+        if (NOT_USERS_FAULT.has(error.code) && deps.refund) await deps.refund(failed);
+      }
+    } catch (e) {
+      log("ALERT: could not record a playbook failure", { playbookId: pb.id, err: String(e) });
+    }
     if (detail.billing) log("ALERT: Gemini billing problem; every model is refusing requests", {});
   } finally {
     clearTimeout(deadline);
-    await unsubscribe();
+    abort(new JobEnded());
+    await unsubscribe?.().catch(() => {});
     // One line per job for dashboards. No titles or channel input.
     log("playbook finished", {
       playbookId: pb.id,
@@ -658,12 +801,14 @@ export async function runPlaybookJob(
       ungrounded,
       repairUsed,
       fallbacksUsed,
+      writerFailed,
+      fallbackModelUsed,
       models,
       versions,
       timingsMs: timings,
       tokens,
       costUsd: Number(cost.toFixed(6)),
-      upstreamFailures,
+      upstreamFailures: upstreamFailures.length,
       warnings: pb.warnings.map((w) => w.code),
       resumed,
     });

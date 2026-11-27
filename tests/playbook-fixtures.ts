@@ -115,6 +115,7 @@ function video(
     outlierScore,
     engagementRate: 0.02,
     group,
+    compared: group === "outlier" || group === "typical",
     briefId: group === "outlier" ? "brf_1" : null,
   };
 }
