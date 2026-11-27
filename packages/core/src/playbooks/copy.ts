@@ -1,7 +1,8 @@
 /**
  * Fallback wording for playbook rules: used when the model leaves a computed rule unwritten
  * (after its one repair), so a playbook never fails over missing words. Drafted in M10; listed
- * in PRD-playbooks.md for sign-off. Plain text, imperative titles under 8 words.
+ * in PRD-playbooks.md for sign-off. Plain text, imperative titles under 8 words. Each how-to
+ * says only what its feature value implies: no invented timings, zoom amounts or styling.
  */
 import type { FeatureName } from "./features.js";
 
@@ -14,20 +15,19 @@ export const FEATURE_COPY: Partial<Record<FeatureName, Record<string, RuleCopy>>
   hook_type: {
     question: {
       title: "Open on a spoken question",
-      how_to:
-        "Make the first line a question to the viewer, inside the first second, before any title card.",
+      how_to: "Make the first line a question to the viewer, before any title card.",
     },
     bold_claim: {
       title: "Lead with a bold claim",
-      how_to: "Open with your strongest statement or promise in the first second, then back it up.",
+      how_to: "Open with your strongest statement or promise, then back it up.",
     },
     result_first: {
       title: "Show the result first",
-      how_to: "Open on the finished result, then cut back to show how you got there.",
+      how_to: "Open on the finished result, then show how you got there.",
     },
     visual_surprise: {
       title: "Open on a visual surprise",
-      how_to: "Start on an unexpected image or motion in the first second, before any talking.",
+      how_to: "Start on an unexpected image or motion that makes viewers look twice.",
     },
     story_open: {
       title: "Start in the middle of a story",
@@ -41,7 +41,8 @@ export const FEATURE_COPY: Partial<Record<FeatureName, Record<string, RuleCopy>>
     },
     "1_to_3s": {
       title: "Start talking within 3 seconds",
-      how_to: "Give the opening shot a beat, then start speaking before the 3-second mark.",
+      how_to:
+        "Let the opening shot play for a moment, then start speaking before the 3-second mark.",
     },
     over_3s: {
       title: "Let the visuals breathe first",
@@ -55,17 +56,17 @@ export const FEATURE_COPY: Partial<Record<FeatureName, Record<string, RuleCopy>>
   text_on_screen_first_second: {
     yes: {
       title: "Put text on screen immediately",
-      how_to: "Show a short title or caption in the first second that tells viewers what's coming.",
+      how_to: "Show a short title or caption in the first second.",
     },
     no: {
       title: "Keep the first second text-free",
-      how_to: "Let the opening shot play clean; add titles only after the hook lands.",
+      how_to: "Let the opening shot play without text; add titles after it.",
     },
   },
   face_in_first_shot: {
     yes: {
       title: "Show a face in the first shot",
-      how_to: "Open on a close-up of a person looking at the camera.",
+      how_to: "Open on a shot with a person's face in it.",
     },
     no: {
       title: "Open on something other than a face",
@@ -75,39 +76,30 @@ export const FEATURE_COPY: Partial<Record<FeatureName, Record<string, RuleCopy>>
   caption_style: {
     word_by_word: {
       title: "Use word-by-word captions",
-      how_to: "Caption 1 to 3 words at a time, synced to speech, with the active word highlighted.",
+      how_to: "Caption a few words at a time, in sync with the speech.",
     },
     phrase: {
       title: "Caption in full phrases",
-      how_to: "Show captions a phrase or sentence at a time, in a steady position.",
+      how_to: "Show captions a phrase or sentence at a time.",
     },
-    none: {
-      title: "Skip the captions",
-      how_to: "Leave speech uncaptioned and let the visuals and voice carry it.",
-    },
+    none: { title: "Skip the captions", how_to: "Leave speech uncaptioned." },
   },
   zoom_punch_ins: {
-    frequent: {
-      title: "Punch in on most cuts",
-      how_to: "Add a 110 to 120 percent zoom on most cuts to keep the energy up.",
-    },
+    frequent: { title: "Punch in on most cuts", how_to: "Add a quick zoom-in on most cuts." },
     some: {
       title: "Punch in now and then",
-      how_to: "Add a quick zoom on key lines only, every few cuts.",
+      how_to: "Add a zoom-in now and then, not on every cut.",
     },
-    none: {
-      title: "Keep the frame steady",
-      how_to: "Avoid zooms; let cuts and framing do the work.",
-    },
+    none: { title: "Keep the frame steady", how_to: "Keep the framing steady, with no zoom-ins." },
   },
   music: {
     trending_or_upbeat: {
       title: "Use an upbeat track",
-      how_to: "Put an energetic track under the whole video, low enough that speech stays clear.",
+      how_to: "Put an energetic track under the video, low enough that speech stays clear.",
     },
     ambient: {
       title: "Keep music as a quiet bed",
-      how_to: "Use soft background music that never competes with the voice.",
+      how_to: "Use soft background music under the video.",
     },
     none: {
       title: "Go without music",
@@ -117,55 +109,43 @@ export const FEATURE_COPY: Partial<Record<FeatureName, Record<string, RuleCopy>>
   ending: {
     call_to_action: {
       title: "End on a clear call to action",
-      how_to: "Finish with one direct ask, such as follow or try it, and cut right after it.",
+      how_to: "Finish with one direct ask, such as to follow or to try it.",
     },
     loop: {
       title: "Make the ending loop back",
       how_to: "End on a shot or line that flows straight back into the opening.",
     },
-    cliffhanger: {
-      title: "End on a cliffhanger",
-      how_to: "Stop just before the payoff so viewers want the next video.",
-    },
-    abrupt: {
-      title: "Cut off sharply at the end",
-      how_to: "End mid-moment with a hard cut, with no outro.",
-    },
+    cliffhanger: { title: "End on a cliffhanger", how_to: "Stop just before the payoff." },
+    abrupt: { title: "Cut off sharply at the end", how_to: "End with a hard cut and no outro." },
   },
   avg_shot_length_bucket: {
-    under_1s: {
-      title: "Cut faster than once a second",
-      how_to: "Keep most shots under 1 second, cutting on every phrase or beat.",
-    },
+    under_1s: { title: "Cut faster than once a second", how_to: "Keep most shots under 1 second." },
     "1_to_2s": {
       title: "Cut every 1 to 2 seconds",
-      how_to: "Keep shots between 1 and 2 seconds, and remove pauses.",
+      how_to: "Keep most shots between 1 and 2 seconds.",
     },
     "2_to_4s": {
       title: "Hold shots for 2 to 4 seconds",
-      how_to: "Let each shot run 2 to 4 seconds; cut on the end of each idea.",
+      how_to: "Let most shots run 2 to 4 seconds.",
     },
-    over_4s: {
-      title: "Let shots run longer",
-      how_to: "Hold shots for more than 4 seconds and let moments play out.",
-    },
+    over_4s: { title: "Let shots run longer", how_to: "Hold most shots for more than 4 seconds." },
   },
   length_bucket: {
     under_15s: {
       title: "Keep it under 15 seconds",
-      how_to: "Trim to one idea and finish before 15 seconds.",
+      how_to: "Finish the video in under 15 seconds.",
     },
     "15_to_30s": {
       title: "Aim for 15 to 30 seconds",
-      how_to: "Cover one idea with a hook, a middle and a payoff in 15 to 30 seconds.",
+      how_to: "Keep the finished video between 15 and 30 seconds.",
     },
     "30_to_60s": {
       title: "Aim for 30 to 60 seconds",
-      how_to: "Use the extra time for a few quick steps or examples, keeping the pace up.",
+      how_to: "Keep the finished video between 30 and 60 seconds.",
     },
     over_60s: {
       title: "Go past a minute",
-      how_to: "Build a fuller story over more than a minute, with a new beat every few seconds.",
+      how_to: "Let the finished video run longer than a minute.",
     },
   },
 };

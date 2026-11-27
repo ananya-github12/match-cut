@@ -141,7 +141,7 @@ export const PLAYBOOK_WARNINGS = {
   RECIPE_UNAVAILABLE:
     "We couldn't write a ready-made prompt for this playbook. Use Apply to write one for your goal.",
   NO_CLEAR_PATTERN:
-    "The breakouts don't share an edit choice that the typical videos lack, so there are no rules to copy yet.",
+    "We couldn't find an edit choice that clearly sets the breakouts apart from typical videos, so there are no rules to copy yet.",
 } as const;
 
 export type PlaybookWarningCode = keyof typeof PLAYBOOK_WARNINGS;

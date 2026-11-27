@@ -386,6 +386,19 @@ describe("GeminiAnalyzer.writePlaybook (PRD-playbooks.md, Playbook writing)", ()
     expect(r.output).toEqual({ rules: [] });
   });
 
+  it("a be_concise retry adds the hint and raises the token cap, as pass 2 does", async () => {
+    const generateContent = vi.fn(async (_p: GenerateContentParameters) => resp());
+    const a = new GeminiAnalyzer({ client: { generateContent } });
+    await a.writePlaybook(
+      { facts, manifest: loadManifest(), language: "en", model: "m" },
+      undefined,
+      { hint: "be_concise" },
+    );
+    const sent = generateContent.mock.calls[0]![0];
+    expect(part(sent)).toHaveLength(2);
+    expect(sent.config?.maxOutputTokens).toBe(8192);
+  });
+
   it("repairs with the playbook schema and the playbook timeout", async () => {
     const generateContent = vi.fn(async (_p: GenerateContentParameters) => resp());
     const a = new GeminiAnalyzer({ client: { generateContent } });

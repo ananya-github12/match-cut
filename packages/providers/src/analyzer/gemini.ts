@@ -425,14 +425,16 @@ export class GeminiAnalyzer implements VideoAnalyzer {
     signal?: AbortSignal,
     ctx: CallContext = {},
   ): Promise<ModelResult> {
+    // As pass 2: a retry after MAX_TOKENS asks for concision and raises the cap.
     const text = playbookUserText(input.facts, input.manifest, input.language);
     return this.call(
       {
         model: input.model,
-        contents: [{ role: "user", parts: [{ text }] }],
+        contents: [{ role: "user", parts: hinted([{ text }], ctx.hint) }],
         config: {
           systemInstruction: PLAYBOOK_SYSTEM_INSTRUCTION,
           ...PLAYBOOK_GENERATION,
+          ...(ctx.hint === "be_concise" ? { maxOutputTokens: BE_CONCISE_MAX_TOKENS } : {}),
           responseMimeType: "application/json",
           responseJsonSchema: PLAYBOOK_RESPONSE_SCHEMA,
           thinkingConfig: { thinkingLevel: this.thinkingLevel },

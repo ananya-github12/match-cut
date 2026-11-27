@@ -257,7 +257,10 @@ const MOCK_RECIPE_WORDS = 180;
 export function mockPlaybook(facts: PlaybookFacts): PlaybookOutput {
   const rules = facts.rules.map((r) => {
     const carrier = facts.outliers.find((o) => o.features[r.feature] === r.value);
-    const moment = carrier ? defaultExampleMoment(r.feature, carrier) : null;
+    // Like a model: the opening or ending for moment features, the second beat otherwise.
+    const beats = carrier?.breakdown.beats ?? [];
+    const mid = beats[Math.min(1, beats.length - 1)]?.start ?? null;
+    const moment = carrier ? (defaultExampleMoment(r.feature, carrier) ?? mid) : null;
     return {
       feature: r.feature,
       value: r.value,
