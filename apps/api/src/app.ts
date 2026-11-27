@@ -6,6 +6,7 @@ import {
   type CapabilityManifest,
   type Limits,
   type ModelNames,
+  type Pricing,
 } from "@match-cut/core";
 import type {
   BriefEvents,
@@ -13,16 +14,21 @@ import type {
   BriefStore,
   JobQueue,
   KV,
+  PlaybookJobQueue,
+  PlaybookStore,
   RateLimiter,
+  SkillStore,
   SpendTracker,
 } from "@match-cut/infra";
-import type { VideoLookup } from "@match-cut/providers";
+import type { ChannelLookup, VideoAnalyzer, VideoLookup } from "@match-cut/providers";
 import Fastify from "fastify";
 import { makeAuthenticate } from "./auth.js";
 import { runHealthChecks, type HealthChecks } from "./health.js";
 import { mcpRoutes } from "./mcp/route.js";
 import type { McpToolOptions } from "./mcp/tools.js";
 import { briefsRoutes } from "./routes/briefs.js";
+import { playbooksRoutes } from "./routes/playbooks.js";
+import { skillsRoutes } from "./routes/skills.js";
 import { videosRoutes } from "./routes/videos.js";
 
 export interface AppDeps {
@@ -46,6 +52,16 @@ export interface AppDeps {
   syncRun?: (record: BriefRecord) => Promise<BriefRecord>;
   /** Match Cut MCP server at /mcp. Off when no keys are given. */
   mcp?: McpToolOptions & { keys: string[] };
+  /** Playbooks and saved skills (PRD-playbooks.md, M10). Off when not given. */
+  playbooks?: {
+    store: PlaybookStore;
+    skills: SkillStore;
+    queue: PlaybookJobQueue;
+    channels: ChannelLookup;
+    /** For apply: the text step that writes a prompt and shot list. */
+    analyzer: VideoAnalyzer;
+    pricing?: Pricing;
+  };
 }
 
 export function buildApp(deps: AppDeps) {
@@ -101,6 +117,34 @@ export function buildApp(deps: AppDeps) {
     limits,
     authenticate,
   });
+  if (deps.playbooks) {
+    const pb = deps.playbooks;
+    const applyDeps = {
+      kv: deps.kv,
+      analyzer: pb.analyzer,
+      models: deps.models,
+      manifest: deps.manifest,
+      limiter: deps.limiter,
+      spend: deps.spend,
+      pricing: pb.pricing,
+    };
+    app.register(playbooksRoutes, {
+      ...applyDeps,
+      playbooks: pb.store,
+      events: deps.events,
+      queue: pb.queue,
+      channels: pb.channels,
+      authenticate,
+      heartbeatMs: deps.heartbeatMs,
+    });
+    app.register(skillsRoutes, {
+      ...applyDeps,
+      skills: pb.skills,
+      briefs: deps.store,
+      playbooks: pb.store,
+      authenticate,
+    });
+  }
   app.register(mcpRoutes, {
     ...deps.mcp,
     keys: deps.mcp?.keys ?? [],

@@ -8,6 +8,7 @@ import {
   countWords,
   defaultExampleMoment,
   fallbackCopy,
+  fillRecipe,
   formatTimecode,
   GOAL_SLOT,
   houseStyleLine,
@@ -15,6 +16,7 @@ import {
   targetSeconds,
   type Breakdown,
   type FeatureName,
+  type Pass2Output,
   type PlaybookFacts,
   type PlaybookOutput,
   type Shot,
@@ -29,6 +31,7 @@ import type {
   CallContext,
   ModelResult,
   RepairInput,
+  ApplyPlaybookInput,
   VideoAnalyzer,
   WatchInput,
   WritePlaybookInput,
@@ -50,7 +53,8 @@ export type MockFault =
   | { output: unknown; text?: string }; // a specific (possibly invalid) response body
 
 export interface MockCall {
-  method: "watch" | "writePrompt" | "repair" | "extractFeatures" | "writePlaybook";
+  method:
+    "watch" | "writePrompt" | "repair" | "extractFeatures" | "writePlaybook" | "applyPlaybook";
   model: string;
   hint?: string;
   timeoutMs?: number;
@@ -294,6 +298,44 @@ export function mockPlaybook(facts: PlaybookFacts): PlaybookOutput {
   };
 }
 
+/** Apply's mock: the recipe filled with the goal (or the rules as steps), and a 4-shot list. */
+export function mockApply(input: ApplyPlaybookInput): Pass2Output {
+  const goal = input.goal.trim() || "a video on my own topic in this style";
+  const format =
+    input.format === "match" ? "vertical 9:16" : (FORMAT_WORDS[input.format] ?? input.format);
+  const length = input.lengthSeconds ?? 30;
+  let prompt: string;
+  if (input.recipe.template) {
+    prompt = `${fillRecipe(input.recipe.template, goal)}\nFrame everything ${format} and keep the finished video to about ${length} seconds.`;
+  } else {
+    const lines = [`Edit my footage into ${goal}, following this playbook's rules.`];
+    let step = 1;
+    for (const r of input.recipe.rules) lines.push(`${step++}. ${r.title}: ${r.how_to}`);
+    for (const s of MOCK_RECIPE_STEPS) {
+      if (countWords(lines.join(" ")) >= MOCK_RECIPE_WORDS) break;
+      if (s.feature && input.recipe.rules.some((r) => r.feature === s.feature)) continue;
+      lines.push(`${step++}. ${s.text}`);
+    }
+    lines.push(
+      `${step}. Frame everything ${format} and keep the finished video to about ${length} seconds.`,
+    );
+    prompt = lines.join("\n");
+  }
+  const each = Math.round((length / 4) * 10) / 10;
+  return {
+    cardboard_prompt: prompt,
+    assets_needed: ["Talking-head takes of each main point, filmed vertically if possible"],
+    watch_outs: ["Write your own script and on-screen words; the playbook is about the craft."],
+    shot_list: Array.from({ length: 4 }, (_, i) => ({
+      shot: `Shot ${i + 1} of my own take on the topic`,
+      framing: MOCK_FRAMINGS[i % MOCK_FRAMINGS.length]!,
+      duration_seconds: i === 3 ? Math.round((length - each * 3) * 10) / 10 : each,
+      maps_to_beat: i + 1,
+      notes: "",
+    })),
+  };
+}
+
 export class MockAnalyzer implements VideoAnalyzer {
   /** Every call, in order, for assertions. */
   readonly calls: MockCall[] = [];
@@ -369,6 +411,24 @@ export class MockAnalyzer implements VideoAnalyzer {
     };
   }
 
+  async applyPlaybook(
+    input: ApplyPlaybookInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult> {
+    const faulted = await this.fault("applyPlaybook", input.model, signal, ctx);
+    if (faulted) return faulted;
+    await sleep(this.opts.writeDelayMs ?? 0, signal);
+    if (input.goal.includes(MOCK_FAULT_IDS.pass2Fails)) throw new MatchCutError("UPSTREAM_ERROR");
+    const output = mockApply(input);
+    return {
+      output,
+      text: JSON.stringify(output),
+      model: input.model,
+      usage: { inputTokens: 2500, outputTokens: 700 },
+    };
+  }
+
   async writePrompt(
     input: WritePromptInput,
     signal?: AbortSignal,
@@ -403,7 +463,7 @@ export class MockAnalyzer implements VideoAnalyzer {
   async repair(input: RepairInput, signal?: AbortSignal, ctx?: CallContext): Promise<ModelResult> {
     const faulted = await this.fault("repair", input.model, signal, ctx);
     if (faulted) return faulted;
-    if (input.pass === 2 || input.pass === "features" || input.pass === "playbook") {
+    if (input.pass !== 1) {
       let output: unknown;
       try {
         output = JSON.parse(input.previousOutput);

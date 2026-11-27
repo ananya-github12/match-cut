@@ -45,6 +45,7 @@ function fake(
     repair: vi.fn(async () => repair ?? result(fixture)),
     extractFeatures: base.extractFeatures.bind(base),
     writePlaybook: base.writePlaybook.bind(base),
+    applyPlaybook: base.applyPlaybook.bind(base),
   };
 }
 

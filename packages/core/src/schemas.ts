@@ -28,7 +28,7 @@ export function isTerminal(status: BriefStatus): boolean {
 
 export const GOAL_MAX_CHARS = 1500;
 // BCP-47 shape check (language, optional script/region/variants), e.g. "en", "hi", "pt-BR", "zh-Hant-TW".
-const BCP47 = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
+export const BCP47 = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 // ---------- Requests ----------
 

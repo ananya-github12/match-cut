@@ -20,6 +20,7 @@ export * from "./playbooks/compare.js";
 export * from "./playbooks/copy.js";
 export * from "./playbooks/writing.js";
 export * from "./playbooks/api.js";
+export * from "./playbooks/apply.js";
 export * from "./timecode.js";
 export * from "./video.js";
 export * from "./schemas.js";

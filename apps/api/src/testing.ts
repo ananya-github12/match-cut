@@ -1,7 +1,15 @@
 /** In-memory app wiring for tests: no Docker, no keys. */
 import { loadManifest, modelNames, parseEnv } from "@match-cut/core";
-import { MemoryBriefEvents, MemoryBriefStore, MemoryJobQueue, MemoryKV } from "@match-cut/infra";
-import { MockVideoLookup } from "@match-cut/providers";
+import {
+  MemoryBriefEvents,
+  MemoryBriefStore,
+  MemoryJobQueue,
+  MemoryKV,
+  MemoryPlaybookQueue,
+  MemoryPlaybookStore,
+  MemorySkillStore,
+} from "@match-cut/infra";
+import { MockAnalyzer, MockChannelLookup, MockVideoLookup } from "@match-cut/providers";
 import type { AppDeps } from "./app.js";
 
 export function memoryDeps(over: Partial<AppDeps> = {}): AppDeps {
@@ -16,6 +24,13 @@ export function memoryDeps(over: Partial<AppDeps> = {}): AppDeps {
     models: modelNames(parseEnv({ DEV_API_TOKEN: "test-token", PROVIDER: "mock" })),
     manifest: loadManifest(),
     devToken: "test-token",
+    playbooks: {
+      store: new MemoryPlaybookStore(),
+      skills: new MemorySkillStore(),
+      queue: new MemoryPlaybookQueue(),
+      channels: new MockChannelLookup(),
+      analyzer: new MockAnalyzer(),
+    },
     ...over,
   };
 }

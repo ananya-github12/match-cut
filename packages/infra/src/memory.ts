@@ -9,6 +9,8 @@ import type {
   JobData,
   JobQueue,
   KV,
+  PlaybookJobData,
+  PlaybookJobQueue,
   PlaybookPatch,
   PlaybookRecord,
   PlaybookSettings,
@@ -212,5 +214,15 @@ export class MemorySkillStore implements SkillStore {
   }
   async delete(id: string) {
     this.rows.delete(id);
+  }
+}
+
+/** Collects playbook jobs; tests run them or set `onEnqueue` to run them immediately. */
+export class MemoryPlaybookQueue implements PlaybookJobQueue {
+  readonly jobs: PlaybookJobData[] = [];
+  onEnqueue?: (job: PlaybookJobData) => void;
+  async enqueue(job: PlaybookJobData) {
+    this.jobs.push(job);
+    this.onEnqueue?.(job);
   }
 }

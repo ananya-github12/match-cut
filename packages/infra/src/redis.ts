@@ -1,7 +1,14 @@
-import { BRIEF_QUEUE } from "@match-cut/core";
+import { BRIEF_QUEUE, PLAYBOOK_QUEUE } from "@match-cut/core";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
-import type { BriefEvents, JobData, JobQueue, KV } from "./types.js";
+import type {
+  BriefEvents,
+  JobData,
+  JobQueue,
+  KV,
+  PlaybookJobData,
+  PlaybookJobQueue,
+} from "./types.js";
 
 export class RedisKV implements KV {
   constructor(
@@ -96,5 +103,33 @@ export class BullJobQueue implements JobQueue {
       removeOnComplete: 1000,
       removeOnFail: 1000,
     });
+  }
+}
+
+/** Producer for playbook jobs (PLAYBOOK_QUEUE). One job per playbook: the playbook ID is the job ID. */
+export class BullPlaybookQueue implements PlaybookJobQueue {
+  readonly queue: Queue<PlaybookJobData>;
+  constructor(connection: Redis, prefix = "bull") {
+    this.queue = new Queue<PlaybookJobData>(PLAYBOOK_QUEUE, { connection, prefix });
+  }
+  async enqueue(job: PlaybookJobData) {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("queue unavailable (timeout)")), 2000);
+    });
+    try {
+      await Promise.race([
+        this.queue.add("playbook", job, {
+          jobId: job.playbookId,
+          // Retries live in the pipeline; a crashed job is restarted once by stalled handling.
+          attempts: 1,
+          removeOnComplete: 1000,
+          removeOnFail: 1000,
+        }),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

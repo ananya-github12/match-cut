@@ -16,3 +16,5 @@ export const PLAYBOOK_VERSION = "pb1";
  * the playbook cache key (PRD-playbooks.md, Cost, limits and caching).
  */
 export const COMPARISON_VERSION = "c1";
+/** Apply: a prompt and shot list from a playbook's rules (PRD-playbooks.md, API additions). */
+export const APPLY_PROMPT_VERSION = "ap1";

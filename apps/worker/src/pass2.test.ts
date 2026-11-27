@@ -50,6 +50,7 @@ function fake(write: ModelResult, repair: ModelResult = res(good())) {
     repair: vi.fn(async (_i: RepairInput) => repair),
     extractFeatures: mock.extractFeatures.bind(mock),
     writePlaybook: mock.writePlaybook.bind(mock),
+    applyPlaybook: mock.applyPlaybook.bind(mock),
   } satisfies VideoAnalyzer;
 }
 

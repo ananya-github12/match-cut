@@ -19,6 +19,7 @@ import type {
   UpstreamFailure,
   RepairInput,
   RetryHint,
+  ApplyPlaybookInput,
   VideoAnalyzer,
   WatchInput,
   WritePlaybookInput,
@@ -248,5 +249,7 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
       run(input, (i, s, c) => inner.extractFeatures(i, s, c), signal, ctx),
     writePlaybook: (input: WritePlaybookInput, signal?: AbortSignal, ctx?: CallContext) =>
       run(input, (i, s, c) => inner.writePlaybook(i, s, c), signal, ctx),
+    applyPlaybook: (input: ApplyPlaybookInput, signal?: AbortSignal, ctx?: CallContext) =>
+      run(input, (i, s, c) => inner.applyPlaybook(i, s, c), signal, ctx),
   };
 }

@@ -1,5 +1,6 @@
 import type {
   AnalyzedRange,
+  ApplyInputs,
   Breakdown,
   CapabilityManifest,
   Detail,
@@ -61,9 +62,14 @@ export interface WritePlaybookInput {
   model: string;
 }
 
+/** Text-only: a prompt and shot list from a playbook's rules (PRD-playbooks.md, apply). */
+export interface ApplyPlaybookInput extends ApplyInputs {
+  model: string;
+}
+
 export interface RepairInput {
-  /** Which call's output is being repaired: pass 1, pass 2, playbook features or writing. */
-  pass: 1 | 2 | "features" | "playbook";
+  /** Which call's output is being repaired: pass 1, pass 2, playbook features, writing or apply. */
+  pass: 1 | 2 | "features" | "playbook" | "apply";
   /** The model's previous output, as text. */
   previousOutput: string;
   /** Plain-English list of failed checks. */
@@ -117,6 +123,12 @@ export interface VideoAnalyzer {
   /** Text-only: a playbook's wording from computed facts. */
   writePlaybook(
     input: WritePlaybookInput,
+    signal?: AbortSignal,
+    ctx?: CallContext,
+  ): Promise<ModelResult>;
+  /** Text-only: a prompt and shot list from a playbook's rules for the user's goal. */
+  applyPlaybook(
+    input: ApplyPlaybookInput,
     signal?: AbortSignal,
     ctx?: CallContext,
   ): Promise<ModelResult>;

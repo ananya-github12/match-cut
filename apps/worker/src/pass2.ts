@@ -10,9 +10,11 @@ import {
   MatchCutError,
   normalizePass2,
   targetSeconds,
+  type Pass2CheckOptions,
   type Pass2Output,
 } from "@match-cut/core";
 import type {
+  ApplyPlaybookInput,
   CallContext,
   UpstreamFailure,
   ModelResult,
@@ -44,14 +46,64 @@ export async function writeAndValidate(
   /** Called after the model answers, before checks and any repair (the "validating" stage). */
   beforeValidate?: () => Promise<void>,
   ctx?: CallContext,
+  /** A saved skill's speech fingerprints, for the copy check when the lines are gone. */
+  spokenFingerprints?: readonly string[],
 ): Promise<Pass2Run> {
-  const opts = {
-    spokenLines,
-    language: input.language,
-    beatCount: input.breakdown.beats.length,
-    targetSeconds: targetSeconds(input.breakdown, input.lengthSeconds),
-  };
-  const first = await analyzer.writePrompt(input, signal, ctx);
+  return validatedPrompt(
+    analyzer,
+    () => analyzer.writePrompt(input, signal, ctx),
+    2,
+    {
+      spokenLines,
+      spokenFingerprints,
+      language: input.language,
+      beatCount: input.breakdown.beats.length,
+      targetSeconds: targetSeconds(input.breakdown, input.lengthSeconds),
+    },
+    signal,
+    beforeValidate,
+    ctx,
+  );
+}
+
+/**
+ * Apply (PRD-playbooks.md): a prompt and shot list from a playbook's rules, with pass 2's checks
+ * and the same one repair. Shots map to the prompt's steps, so there's no beat count to check.
+ */
+export async function applyAndValidate(
+  analyzer: VideoAnalyzer,
+  input: ApplyPlaybookInput,
+  copyCheck: { spokenLines: string[]; spokenFingerprints?: readonly string[] },
+  signal?: AbortSignal,
+  ctx?: CallContext,
+): Promise<Pass2Run> {
+  return validatedPrompt(
+    analyzer,
+    () => analyzer.applyPlaybook(input, signal, ctx),
+    "apply",
+    {
+      spokenLines: copyCheck.spokenLines,
+      spokenFingerprints: copyCheck.spokenFingerprints,
+      language: input.language,
+      targetSeconds: input.lengthSeconds,
+    },
+    signal,
+    undefined,
+    ctx,
+  );
+}
+
+/** Write, check, one repair; the prompt is kept when only the shot list is still wrong. */
+async function validatedPrompt(
+  analyzer: VideoAnalyzer,
+  write: () => Promise<ModelResult>,
+  repairPass: 2 | "apply",
+  opts: Pass2CheckOptions,
+  signal?: AbortSignal,
+  beforeValidate?: () => Promise<void>,
+  ctx?: CallContext,
+): Promise<Pass2Run> {
+  const first = await write();
   await beforeValidate?.();
   const tokens = { input: first.usage.inputTokens, output: first.usage.outputTokens };
   const check =
@@ -72,7 +124,12 @@ export async function writeAndValidate(
   let repaired;
   try {
     repaired = await analyzer.repair(
-      { pass: 2, previousOutput: asText(first), problems: check.problems, model: first.model },
+      {
+        pass: repairPass,
+        previousOutput: asText(first),
+        problems: check.problems,
+        model: first.model,
+      },
       signal,
       { budget: ctx?.budget, timeoutMs: REPAIR_TIMEOUT_MS },
     );
@@ -94,7 +151,7 @@ export async function writeAndValidate(
       "INVALID_MODEL_OUTPUT",
       {},
       {
-        pass: 2,
+        pass: repairPass,
         problemsBefore: check.problems,
         problemsAfter: second.problems,
       },

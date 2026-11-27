@@ -461,6 +461,40 @@ All under `/v1`, same auth, JSON and idempotency rules as v1.
 
 YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
 
+**Error codes added in M10.7** (copy drafted; needs owner sign-off)
+
+| Code | HTTP | Retryable | Message |
+| --- | --- | --- | --- |
+| `PLAYBOOK_NOT_FOUND` | 404 | No | This playbook doesn't exist or was deleted. |
+| `PLAYBOOK_NOT_READY` | 409 | Yes | This playbook is still being worked on. Try again when it finishes. |
+| `PLAYBOOK_HAS_NO_RULES` | 422 | No | This playbook didn't find a clear pattern, so there's nothing to apply or save. |
+| `SKILL_NOT_FOUND` | 404 | No | This skill doesn't exist or was deleted. |
+| `SKILL_LIMIT_REACHED` | 409 | No | You can save up to {limit} skills. Delete one to save another. |
+
+**API behavior notes (M10.7)**
+
+- **`POST /v1/playbooks`**:
+  - Order of steps:
+    1. Takes a rate-limit slot (5 playbooks per user per day, `RATE_PLAYBOOKS_PER_DAY`). Bad input counts, as in v1.
+    2. Validates. The channel input is checked first (`INVALID_URL`, `UNSUPPORTED_SOURCE`), then the other fields (`INVALID_REQUEST`).
+    3. Resolves the channel, cached for 24 hours. An unknown channel fails at once with `CHANNEL_NOT_FOUND`. A YouTube quota error gives `CAPACITY_EXHAUSTED`. Any other YouTube outage leaves resolving to the worker.
+  - Returns 200 with the user's own finished playbook for the same channel and settings from the last 24 hours. A degraded one (skipped videos, fallback wording, fallback model) isn't reused.
+  - A repeat while the same playbook is running attaches to it (202).
+  - Neither a repeat nor an attach uses a slot.
+  - `force_refresh` always starts a new job.
+  - The spend cap is checked before queueing.
+  - If the queue is down, the request fails with `INTERNAL`. Playbooks are too long for v1's synchronous fallback.
+- **Refunds**: a playbook or apply that fails for a reason that isn't the user's gives the slot back, as in v1.
+- **`POST /v1/playbooks/{id}/apply`** and **`POST /v1/skills/{id}/apply`**:
+  - Request: `goal` (up to 1,500 characters), `target.format` (as v1; `match` means vertical 9:16, like the channel's Shorts), `target.length_seconds` (5 to 600, or null) and `output_language`.
+  - Response: `cardboard_prompt`, `assets_needed`, `watch_outs`, `shot_list`, `warnings` (`SHOT_LIST_UNAVAILABLE` if the shot list failed its checks) and `meta` (`model`, `prompt_version`, `cached`, `tokens`).
+  - Synchronous, with pass 2's checks and one repair. It takes a regenerate slot and checks the spend cap. Results are cached for 7 days.
+  - A playbook (or playbook skill) uses a new text step: rules and recipe in, prompt and shot list out (`APPLY_PROMPT_VERSION`). Its shots map to the prompt's steps, not to reference beats.
+  - A brief skill runs pass 2 on its saved breakdown, checked against the saved speech fingerprints.
+  - Applying a skill updates its `last_used_at`.
+- **Skills**: `POST /v1/skills` returns 201 with the skill object. `GET /v1/skills` returns `{ skills: [...] }` without snapshots. Ownership is checked on every endpoint, and another user's ID reads as not found.
+- **Not built in M10**: "Refresh from channel" has no endpoint. The app can start a playbook with the snapshot's settings and save it again.
+
 **User-facing copy for new errors**
 
 | Code | Message |

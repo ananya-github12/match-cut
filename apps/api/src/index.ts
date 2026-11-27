@@ -2,17 +2,21 @@ import {
   DEFAULT_LIMITS,
   loadEnv,
   loadManifest,
+  loadPricing,
   mcpApiKeys,
   modelNames,
   useYouTubeLookup,
 } from "@match-cut/core";
 import {
   BullJobQueue,
+  BullPlaybookQueue,
   connectPostgres,
   defaultRules,
   goalKeyFrom,
   previousKeysFrom,
   PgBriefStore,
+  PgPlaybookStore,
+  PgSkillStore,
   RateLimiter,
   RedisBriefEvents,
   RedisKV,
@@ -20,7 +24,14 @@ import {
   SafeKV,
   SpendTracker,
 } from "@match-cut/infra";
-import { CachedVideoLookup, MockVideoLookup, YouTubeDataApiLookup } from "@match-cut/providers";
+import {
+  CachedChannelLookup,
+  CachedVideoLookup,
+  MockChannelLookup,
+  MockVideoLookup,
+  YouTubeDataApiChannelLookup,
+  YouTubeDataApiLookup,
+} from "@match-cut/providers";
 import { buildAnalyzer, makeSyncRunner } from "@match-cut/worker/setup";
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "ioredis";
@@ -62,11 +73,16 @@ const limiter = new RateLimiter(
     userPerDay: env.RATE_USER_PER_DAY,
     regeneratePerHour: env.RATE_REGENERATE_PER_HOUR,
     orgPerDay: env.RATE_ORG_PER_DAY,
+    playbooksPerDay: env.RATE_PLAYBOOKS_PER_DAY,
   }),
 );
 const spend = new SpendTracker(kv, { capUsd: env.DAILY_SPEND_CAP_USD });
 
 const queue = new BullJobQueue(bull, `${env.REDIS_NAMESPACE}-bull`);
+const playbookQueue = new BullPlaybookQueue(bull, `${env.REDIS_NAMESPACE}-bull`);
+const goalKey = goalKeyFrom(env.GOAL_ENCRYPTION_KEY, env.DEV_API_TOKEN);
+const previousGoalKeys = previousKeysFrom(env.GOAL_ENCRYPTION_KEY_PREVIOUS);
+const analyzer = buildAnalyzer(env, models);
 const gemini =
   env.PROVIDER === "gemini"
     ? new GoogleGenAI({
@@ -81,11 +97,7 @@ const app = buildApp({
   trustProxy: env.NODE_ENV === "production",
   // PRD cache layer 1: precheck metadata for 6 hours.
   lookup: new CachedVideoLookup(rawLookup, kv),
-  store: new PgBriefStore(
-    db,
-    goalKeyFrom(env.GOAL_ENCRYPTION_KEY, env.DEV_API_TOKEN),
-    previousKeysFrom(env.GOAL_ENCRYPTION_KEY_PREVIOUS),
-  ),
+  store: new PgBriefStore(db, goalKey, previousGoalKeys),
   kv,
   events: new RedisBriefEvents(redis, sub, `${env.REDIS_NAMESPACE}:`),
   queue,
@@ -93,6 +105,20 @@ const app = buildApp({
   manifest: loadManifest(),
   devToken: env.DEV_API_TOKEN,
   mcp: { keys: mcpApiKeys(env) },
+  // PRD-playbooks.md, M10. Channel data cached 24 h; mock mode uses the offline channels.
+  playbooks: {
+    store: new PgPlaybookStore(db),
+    skills: new PgSkillStore(db, goalKey, previousGoalKeys),
+    queue: playbookQueue,
+    channels: useYouTubeLookup(env)
+      ? new CachedChannelLookup(
+          new YouTubeDataApiChannelLookup({ apiKey: env.YOUTUBE_DATA_API_KEY! }),
+          kv,
+        )
+      : new MockChannelLookup(),
+    analyzer,
+    pricing: loadPricing(),
+  },
   region: env.YOUTUBE_REGION,
   limits: {
     ...DEFAULT_LIMITS,
@@ -104,7 +130,7 @@ const app = buildApp({
   syncRun: makeSyncRunner({
     env,
     models,
-    analyzer: buildAnalyzer(env, models),
+    analyzer,
     kv,
     lookup: rawLookup,
     spend,
@@ -132,7 +158,7 @@ const app = buildApp({
 
 const shutdown = async () => {
   await app.close();
-  await queue.queue.close();
+  await Promise.all([queue.queue.close(), playbookQueue.queue.close()]);
   await Promise.allSettled([sql.end({ timeout: 2 })]);
   for (const r of [redis, sub, bull]) r.disconnect();
   process.exit(0);

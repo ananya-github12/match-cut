@@ -42,6 +42,7 @@ const analyzerWith = (over: Partial<VideoAnalyzer>): VideoAnalyzer => ({
   repair: mock.repair.bind(mock),
   extractFeatures: mock.extractFeatures.bind(mock),
   writePlaybook: mock.writePlaybook.bind(mock),
+  applyPlaybook: mock.applyPlaybook.bind(mock),
   ...over,
 });
 

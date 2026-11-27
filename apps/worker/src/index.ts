@@ -75,6 +75,16 @@ const log = (msg: string, extra?: Record<string, unknown>) =>
   console.log(JSON.stringify({ level: "info", src: "worker", msg, ...extra }));
 
 const spend = new SpendTracker(kv, { capUsd: env.DAILY_SPEND_CAP_USD });
+const limiter = new RateLimiter(
+  kv,
+  defaultRules({
+    userPerHour: env.RATE_USER_PER_HOUR,
+    userPerDay: env.RATE_USER_PER_DAY,
+    regeneratePerHour: env.RATE_REGENERATE_PER_HOUR,
+    orgPerDay: env.RATE_ORG_PER_DAY,
+    playbooksPerDay: env.RATE_PLAYBOOKS_PER_DAY,
+  }),
+);
 
 const deps: PipelineDeps = {
   ...pipelineSettings(env),
@@ -88,15 +98,7 @@ const deps: PipelineDeps = {
     ? new MockVideoLookup()
     : new YouTubeDataApiLookup({ apiKey: env.YOUTUBE_DATA_API_KEY! }),
   spend,
-  limiter: new RateLimiter(
-    kv,
-    defaultRules({
-      userPerHour: env.RATE_USER_PER_HOUR,
-      userPerDay: env.RATE_USER_PER_DAY,
-      regeneratePerHour: env.RATE_REGENERATE_PER_HOUR,
-      orgPerDay: env.RATE_ORG_PER_DAY,
-    }),
-  ),
+  limiter,
   log,
 };
 
@@ -137,6 +139,8 @@ const playbookWorker = new Worker<PlaybookJobData>(
       watchConcurrency: env.PLAYBOOK_WATCH_CONCURRENCY,
       pricing: deps.pricing,
       spend,
+      // PRD: failed jobs aren't billed to user quotas.
+      refund: (pb) => limiter.refund("playbook", pb, pb.createdAt),
       log,
     }),
   {

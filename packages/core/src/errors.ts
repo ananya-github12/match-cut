@@ -112,6 +112,44 @@ export const ERRORS = {
     retryable: true,
     message: "This brief is still being worked on. Try again when it finishes.",
   },
+  // ---- PRD-playbooks.md, API additions. ----
+  /** `source.mine` without a connected channel. Until M11 nobody can connect one. */
+  YOUTUBE_NOT_CONNECTED: {
+    http: 403,
+    retryable: false,
+    message: "Connect your YouTube channel to analyze your own videos.",
+  },
+  // ---- Added in M10.7, pending sign-off. ----
+  /** Unknown playbook ID, or one owned by another user. */
+  PLAYBOOK_NOT_FOUND: {
+    http: 404,
+    retryable: false,
+    message: "This playbook doesn't exist or was deleted.",
+  },
+  /** Apply or save called while the playbook is still running, or after it failed. */
+  PLAYBOOK_NOT_READY: {
+    http: 409,
+    retryable: true,
+    message: "This playbook is still being worked on. Try again when it finishes.",
+  },
+  /** Apply or save on a playbook whose comparison kept no rule (NO_CLEAR_PATTERN). */
+  PLAYBOOK_HAS_NO_RULES: {
+    http: 422,
+    retryable: false,
+    message: "This playbook didn't find a clear pattern, so there's nothing to apply or save.",
+  },
+  /** Unknown skill ID, or one owned by another user. */
+  SKILL_NOT_FOUND: {
+    http: 404,
+    retryable: false,
+    message: "This skill doesn't exist or was deleted.",
+  },
+  /** PRD: 50 skills per user. */
+  SKILL_LIMIT_REACHED: {
+    http: 409,
+    retryable: false,
+    message: "You can save up to {limit} skills. Delete one to save another.",
+  },
 } as const satisfies Record<string, { http: number; retryable: boolean; message: string }>;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -4,7 +4,8 @@
  */
 import type { KV } from "./types.js";
 
-export type LimitKind = "analyze" | "regenerate";
+/** analyze: a new brief. regenerate: a new prompt (also apply). playbook: a new playbook. */
+export type LimitKind = "analyze" | "regenerate" | "playbook";
 
 export interface LimitRule {
   name: string;
@@ -19,6 +20,8 @@ export function defaultRules(c: {
   userPerDay: number;
   regeneratePerHour: number;
   orgPerDay: number;
+  /** PRD-playbooks.md: 5 a day. Omit for no playbook limit. */
+  playbooksPerDay?: number;
 }): LimitRule[] {
   return [
     {
@@ -37,6 +40,17 @@ export function defaultRules(c: {
       limit: c.regeneratePerHour,
       windowSeconds: 3600,
     },
+    ...(c.playbooksPerDay === undefined
+      ? []
+      : [
+          {
+            name: "playbook-day",
+            kind: "playbook" as const,
+            scope: "user" as const,
+            limit: c.playbooksPerDay,
+            windowSeconds: 86400,
+          },
+        ]),
   ];
 }
 

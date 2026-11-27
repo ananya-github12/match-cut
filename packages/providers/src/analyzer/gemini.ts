@@ -7,6 +7,9 @@
  * One call per method; retries and the fallback chain live in fallback.ts (withFallback).
  */
 import {
+  APPLY_SYSTEM_INSTRUCTION,
+  applyRepairText,
+  applyUserText,
   canonicalYouTubeUrl,
   FEATURES_RESPONSE_SCHEMA,
   FEATURES_SYSTEM_INSTRUCTION,
@@ -40,6 +43,7 @@ import type {
   ModelResult,
   RepairInput,
   RetryHint,
+  ApplyPlaybookInput,
   VideoAnalyzer,
   WatchInput,
   WritePlaybookInput,
@@ -369,6 +373,12 @@ export class GeminiAnalyzer implements VideoAnalyzer {
         generation: PLAYBOOK_GENERATION,
         schema: PLAYBOOK_RESPONSE_SCHEMA,
       },
+      apply: {
+        text: applyRepairText,
+        system: APPLY_SYSTEM_INSTRUCTION,
+        generation: PASS2_GENERATION,
+        schema: PASS2_RESPONSE_SCHEMA,
+      },
     }[input.pass];
     return this.call(
       {
@@ -440,6 +450,32 @@ export class GeminiAnalyzer implements VideoAnalyzer {
           thinkingConfig: { thinkingLevel: this.thinkingLevel },
           abortSignal: signal,
           httpOptions: { timeout: Math.min(this.playbookTimeoutMs, ctx.timeoutMs ?? Infinity) },
+        },
+      },
+      input.model,
+      signal,
+    );
+  }
+
+  /** Same shape, settings and time budget as pass 2: the same kind of text step. */
+  async applyPlaybook(
+    input: ApplyPlaybookInput,
+    signal?: AbortSignal,
+    ctx: CallContext = {},
+  ): Promise<ModelResult> {
+    return this.call(
+      {
+        model: input.model,
+        contents: [{ role: "user", parts: hinted([{ text: applyUserText(input) }], ctx.hint) }],
+        config: {
+          systemInstruction: APPLY_SYSTEM_INSTRUCTION,
+          ...PASS2_GENERATION,
+          ...(ctx.hint === "be_concise" ? { maxOutputTokens: BE_CONCISE_MAX_TOKENS } : {}),
+          responseMimeType: "application/json",
+          responseJsonSchema: PASS2_RESPONSE_SCHEMA,
+          thinkingConfig: { thinkingLevel: this.thinkingLevel },
+          abortSignal: signal,
+          httpOptions: { timeout: Math.min(this.pass2TimeoutMs, ctx.timeoutMs ?? Infinity) },
         },
       },
       input.model,
