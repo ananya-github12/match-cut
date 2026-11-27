@@ -218,13 +218,40 @@ export interface PlaybookRecord {
 
 export type PlaybookPatch = Partial<Omit<PlaybookRecord, "id" | "userId" | "orgId" | "createdAt">>;
 
+export interface PlaybookUpdateOptions {
+  /**
+   * Apply the patch only while the playbook has one of these statuses, so the worker's final
+   * write can't undo a cancel that landed first. Returns null when the status didn't match.
+   */
+  onlyIfStatus?: readonly BriefStatus[];
+}
+
 export interface PlaybookStore {
+  /** Throws if the ID exists. */
   create(rec: PlaybookRecord): Promise<void>;
+  /** By ID only: checking the owner is the API's job. */
   get(id: string): Promise<PlaybookRecord | null>;
-  update(id: string, patch: PlaybookPatch): Promise<PlaybookRecord | null>;
+  /** Keys whose value is undefined are left unchanged; null clears. */
+  update(
+    id: string,
+    patch: PlaybookPatch,
+    opts?: PlaybookUpdateOptions,
+  ): Promise<PlaybookRecord | null>;
   delete(id: string): Promise<void>;
   /** Retention: YouTube statistics are kept no longer than allowed. Returns how many. */
   deleteOlderThan(cutoff: Date): Promise<number>;
+  /**
+   * The user's newest succeeded playbook for this channel and these settings made at or after
+   * `since` (PRD: a repeat request within 24 h returns it with 200). Null if none.
+   */
+  findRecent(q: {
+    userId: string;
+    channelId: string;
+    settings: PlaybookSettings;
+    since: Date;
+  }): Promise<PlaybookRecord | null>;
+  /** Playbooks the user started at or after `since` (PRD limit: 5 a day). */
+  countByUserSince(userId: string, since: Date): Promise<number>;
 }
 
 // ---------- Skills (PRD-playbooks.md, Feature 4) ----------
@@ -233,26 +260,36 @@ export type SkillSource = { type: "brief"; id: string } | { type: "playbook"; id
 
 /**
  * What apply needs, copied at save time so a skill keeps working after its brief or playbook is
- * deleted and caches expire. No view counts: only the rules' evidence counts and the recipe.
+ * deleted and caches expire. No view, like or comment counts; the rules keep their evidence
+ * counts (how many compared videos had each edit choice). No speech either: apply's copy check
+ * uses one-way fingerprints of the source's spoken lines (spokenFingerprints in core).
  */
 export type SkillSnapshot =
   | {
       type: "brief";
+      /** When the source brief was made (ISO 8601). */
+      generatedAt: string;
       videoId: string;
       videoTitle: string | null;
       breakdown: Breakdown;
-      /** Internal only: for apply's copy check. */
-      spokenLines: string[];
+      /** Internal only. */
+      spokenFingerprints: string[];
     }
   | {
       type: "playbook";
+      generatedAt: string;
       channel: { id: string; title: string; handle: string | null };
+      /** The playbook's settings, for "Refresh from channel". */
+      settings: PlaybookSettings;
+      window: { from: string; to: string } | null;
       rules: PlaybookRule[];
       houseStyle: string;
       notExplained: string[];
       recipePromptTemplate: string | null;
-      /** Internal only: for apply's copy check. */
-      spokenLines: string[];
+      /** The playbook's caveats travel with its rules. */
+      warnings: PlaybookWarning[];
+      /** Internal only. */
+      spokenFingerprints: string[];
     };
 
 export interface SkillRecord {
@@ -272,7 +309,7 @@ export interface SkillRecord {
 }
 
 export type SkillPatch = Partial<
-  Pick<SkillRecord, "name" | "snapshot" | "versions" | "sourceTitle" | "lastUsedAt">
+  Pick<SkillRecord, "name" | "snapshot" | "versions" | "sourceTitle">
 >;
 
 export interface SkillStore {
@@ -284,6 +321,9 @@ export interface SkillStore {
   get(id: string): Promise<SkillRecord | null>;
   /** The user's skills, most recently used (or created) first. */
   listByUser(userId: string): Promise<SkillRecord[]>;
+  /** Keys whose value is undefined are left unchanged. Bumps updatedAt. */
   update(id: string, patch: SkillPatch): Promise<SkillRecord | null>;
+  /** Records an apply: sets lastUsedAt only (not an edit, so updatedAt stays). */
+  markUsed(id: string, at: Date): Promise<void>;
   delete(id: string): Promise<void>;
 }

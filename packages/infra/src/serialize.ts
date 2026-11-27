@@ -120,19 +120,33 @@ export function toSkillSummary(r: SkillRecord): SkillSummaryResponse {
   };
 }
 
-/** A skill with its snapshot. Spoken lines stay internal. */
+/** A skill with its snapshot. Speech fingerprints stay internal. */
 export function toSkillResponse(r: SkillRecord): SkillResponse {
   const s = r.snapshot;
   const snapshot: SkillSnapshotResponse =
     s.type === "brief"
-      ? { type: "brief", video_id: s.videoId, video_title: s.videoTitle, breakdown: s.breakdown }
+      ? {
+          type: "brief",
+          generated_at: s.generatedAt,
+          video_id: s.videoId,
+          video_title: s.videoTitle,
+          breakdown: s.breakdown,
+        }
       : {
           type: "playbook",
+          generated_at: s.generatedAt,
           channel: s.channel,
+          settings: {
+            window_days: s.settings.windowDays,
+            max_videos: s.settings.maxVideos,
+            outlier_threshold: s.settings.outlierThreshold,
+          },
+          window: s.window,
           rules: s.rules,
           house_style: s.houseStyle,
           not_explained: s.notExplained,
           recipe_prompt_template: s.recipePromptTemplate,
+          warnings: s.warnings,
         };
   return { ...toSkillSummary(r), snapshot, versions: r.versions };
 }

@@ -1,4 +1,6 @@
+import type { BriefStatus, PlaybookStage } from "@match-cut/core";
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import type { PlaybookRecord, SkillSnapshot, SkillSource } from "../types.js";
 
 export const briefs = pgTable(
   "briefs",
@@ -41,30 +43,33 @@ export const playbooks = pgTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     orgId: text("org_id").notNull(),
-    status: text("status").notNull(),
-    stage: text("stage"),
-    progress: jsonb("progress"),
+    status: text("status").$type<BriefStatus>().notNull(),
+    stage: text("stage").$type<PlaybookStage>(),
+    progress: jsonb("progress").$type<PlaybookRecord["progress"]>(),
     // The parsed channel reference; the raw input is never stored.
-    source: jsonb("source").notNull(),
-    settings: jsonb("settings").notNull(),
+    source: jsonb("source").$type<PlaybookRecord["source"]>().notNull(),
+    settings: jsonb("settings").$type<PlaybookRecord["settings"]>().notNull(),
     forceRefresh: boolean("force_refresh").notNull().default(false),
-    channel: jsonb("channel"),
+    // Copied from channel.id by the store, for the 24-hour repeat lookup.
+    channelId: text("channel_id"),
+    channel: jsonb("channel").$type<PlaybookRecord["channel"]>(),
     // "window" is a reserved word in SQL.
-    window: jsonb("scoring_window"),
-    baseline: jsonb("baseline"),
-    videos: jsonb("videos").notNull().default([]),
-    comparison: jsonb("comparison"),
-    content: jsonb("content"),
-    spokenLines: jsonb("spoken_lines_internal"),
-    warnings: jsonb("warnings").notNull().default([]),
-    error: jsonb("error"),
-    meta: jsonb("meta").notNull(),
+    window: jsonb("scoring_window").$type<PlaybookRecord["window"]>(),
+    baseline: jsonb("baseline").$type<PlaybookRecord["baseline"]>(),
+    videos: jsonb("videos").$type<PlaybookRecord["videos"]>().notNull().default([]),
+    comparison: jsonb("comparison").$type<PlaybookRecord["comparison"]>(),
+    content: jsonb("content").$type<PlaybookRecord["content"]>(),
+    spokenLines: jsonb("spoken_lines_internal").$type<string[]>(),
+    warnings: jsonb("warnings").$type<PlaybookRecord["warnings"]>().notNull().default([]),
+    error: jsonb("error").$type<PlaybookRecord["error"]>(),
+    meta: jsonb("meta").$type<PlaybookRecord["meta"]>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (t) => [
     index("playbooks_user_created_idx").on(t.userId, t.createdAt),
     index("playbooks_created_at_idx").on(t.createdAt),
+    index("playbooks_channel_created_idx").on(t.channelId, t.createdAt),
   ],
 );
 
@@ -77,11 +82,11 @@ export const skills = pgTable(
     orgId: text("org_id").notNull(),
     // User-written text: encrypted at rest, like goals.
     name: text("name").notNull(),
-    sourceType: text("source_type").notNull(),
+    sourceType: text("source_type").$type<SkillSource["type"]>().notNull(),
     sourceId: text("source_id").notNull(),
     sourceTitle: text("source_title"),
-    snapshot: jsonb("snapshot").notNull(),
-    versions: jsonb("versions").notNull(),
+    snapshot: jsonb("snapshot").$type<SkillSnapshot>().notNull(),
+    versions: jsonb("versions").$type<Record<string, string>>().notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

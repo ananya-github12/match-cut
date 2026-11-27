@@ -137,12 +137,19 @@ describe("skill snapshots (PRD-playbooks.md, Feature 4)", () => {
     expect(draft.sourceTitle).toBe("Mock Golden 01");
     expect(draft.snapshot).toMatchObject({
       type: "playbook",
+      generatedAt: "2026-11-20T10:00:00.000Z",
       rules: [RULE],
       channel: { id: "UCmockgolden01xxxxxxxxxx", handle: "mockgolden01" },
-      spokenLines: ["a line someone said in a breakout video"],
+      settings: { windowDays: 90, maxVideos: 50, outlierThreshold: 2 },
+      window: { from: "2026-08-22T10:00:00.000Z", to: "2026-11-20T10:00:00.000Z" },
+      // The caveats travel with the rules.
+      warnings: [{ code: "SMALL_SAMPLE", message: "x" }],
     });
     expect(draft.versions).toMatchObject({ features: "f1", comparison: "c1", playbook: "pb1" });
-    expect(JSON.stringify(draft)).not.toMatch(/"views"|"likes"|medianViews/);
+    // No public stats and no speech: only fingerprints of it.
+    const json = JSON.stringify(draft);
+    expect(json).not.toMatch(/"views"|"likes"|"comments"|medianViews|outlierScore/);
+    expect(json).not.toContain("someone said");
   });
 
   it("refuses an unfinished playbook or one without rules", () => {
@@ -161,10 +168,11 @@ describe("skill snapshots (PRD-playbooks.md, Feature 4)", () => {
       if (typeof draft === "string") throw new Error(draft);
       expect(draft.snapshot).toEqual({
         type: "brief",
+        generatedAt: "2026-11-21T10:00:00.000Z",
         videoId: "dQw4w9WgXcQ",
         videoTitle: "A reference",
         breakdown: fixtureBreakdown,
-        spokenLines: ["spoken"],
+        spokenFingerprints: [],
       });
       expect(JSON.stringify(draft)).not.toContain("secret goal");
     }
@@ -172,7 +180,7 @@ describe("skill snapshots (PRD-playbooks.md, Feature 4)", () => {
     expect(skillFromBrief(briefRecord({ status: "failed", breakdown: null }))).toBe("NOT_READY");
   });
 
-  it("serializes skills without spoken lines", () => {
+  it("serializes skills without speech fingerprints", () => {
     const rec = skillRecord({ lastUsedAt: new Date("2026-11-22T00:00:00Z") });
     expect(toSkillSummary(rec)).toEqual({
       id: rec.id,
@@ -183,31 +191,40 @@ describe("skill snapshots (PRD-playbooks.md, Feature 4)", () => {
       updated_at: "2026-11-21T10:00:00.000Z",
     });
     const full = toSkillResponse(rec);
-    expect(full.snapshot).toMatchObject({
+    expect(full.snapshot).toEqual({
       type: "playbook",
+      generated_at: "2026-11-20T10:00:00.000Z",
+      channel: { id: "UCmockgolden01xxxxxxxxxx", title: "Mock Golden 01", handle: "mockgolden01" },
+      settings: { window_days: 90, max_videos: 50, outlier_threshold: 2 },
+      window: { from: "2026-08-22T10:00:00.000Z", to: "2026-11-20T10:00:00.000Z" },
       rules: [RULE],
+      house_style: "",
+      not_explained: ["Timing and trends also play a part."],
       recipe_prompt_template: null,
+      warnings: [{ code: "SMALL_SAMPLE", message: "x" }],
     });
-    expect(JSON.stringify(full)).not.toContain("internal");
+    expect(JSON.stringify(full)).not.toMatch(/0123456789abcdef|ingerprint/);
     const brief = toSkillResponse(
       skillRecord({
         source: { type: "brief", id: "brf_1" },
         snapshot: {
           type: "brief",
+          generatedAt: "2026-11-21T10:00:00.000Z",
           videoId: "dQw4w9WgXcQ",
           videoTitle: null,
           breakdown: fixtureBreakdown,
-          spokenLines: ["internal"],
+          spokenFingerprints: ["0123456789abcdef"],
         },
       }),
     );
     expect(brief.snapshot).toEqual({
       type: "brief",
+      generated_at: "2026-11-21T10:00:00.000Z",
       video_id: "dQw4w9WgXcQ",
       video_title: null,
       breakdown: fixtureBreakdown,
     });
-    expect(JSON.stringify(brief)).not.toContain("internal");
+    expect(JSON.stringify(brief)).not.toMatch(/0123456789abcdef|ingerprint/);
   });
 });
 
@@ -220,16 +237,29 @@ describe("request schemas (PRD-playbooks.md, API additions)", () => {
       outlier_threshold: 2,
       force_refresh: false,
     });
+    // Trimmed; length in characters, so 2,048 emoji fit.
+    expect(createPlaybookRequestSchema.parse({ source: { channel: "  @a  " } }).source).toEqual({
+      channel: "@a",
+    });
+    expect(
+      createPlaybookRequestSchema.safeParse({ source: { channel: "😀".repeat(2048) } }).success,
+    ).toBe(true);
+    // Own channel (M11): accepted, so the route can answer YOUTUBE_NOT_CONNECTED as the PRD says.
+    expect(createPlaybookRequestSchema.parse({ source: { mine: true } }).source).toEqual({
+      mine: true,
+    });
     for (const bad of [
       { source: { channel: "" } },
+      { source: { channel: "   " } },
       { source: { channel: "x".repeat(2049) } },
+      { source: { mine: false } },
+      { source: { channel: "@a", mine: true } },
       { source: { channel: "@a" }, window_days: 29 },
       { source: { channel: "@a" }, window_days: 181 },
       { source: { channel: "@a" }, max_videos: 9 },
       { source: { channel: "@a" }, outlier_threshold: 1.4 },
       { source: { channel: "@a" }, outlier_threshold: 10.5 },
       { source: { channel: "@a" }, extra: 1 },
-      { source: { mine: true } },
       {},
     ]) {
       expect(createPlaybookRequestSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
@@ -243,8 +273,16 @@ describe("request schemas (PRD-playbooks.md, API additions)", () => {
       name: "My hooks",
       source: { playbook_id: "pb_1" },
     });
+    // Invisible characters go, NFC applies, and length counts characters, not UTF-16 units.
+    const name = (n: string) =>
+      createSkillRequestSchema.parse({ name: n, source: { brief_id: "b" } }).name;
+    expect(name("Hooks\u200B\u202E that\tland")).toBe("Hooks that land");
+    expect(name("Cafe\u0301")).toBe("Café");
+    expect(name("🎬".repeat(SKILL_NAME_MAX_CHARS))).toHaveLength(SKILL_NAME_MAX_CHARS * 2);
     for (const bad of [
       { name: "   ", source: { brief_id: "b" } },
+      { name: "\u200B\u200D", source: { brief_id: "b" } },
+      { name: "🎬".repeat(SKILL_NAME_MAX_CHARS + 1), source: { brief_id: "b" } },
       { name: "x".repeat(SKILL_NAME_MAX_CHARS + 1), source: { brief_id: "b" } },
       { name: "ok", source: { brief_id: "b", playbook_id: "p" } },
       { name: "ok", source: {} },

@@ -3,7 +3,10 @@ import {
   checkPass2,
   countWords,
   longestSharedRun,
+  matchesSpokenFingerprints,
+  MAX_SHARED_RUN,
   normalizePass2,
+  spokenFingerprints,
   splitInlineSteps,
   stripPromptMarkdown,
 } from "./validate-prompt.js";
@@ -181,5 +184,49 @@ describe("checkPass2 shot list (PRD-playbooks.md, Feature 2)", () => {
     const r = check(output({ cardboard_prompt: prompt(5) }));
     expect(r.output).toBeNull();
     expect(r.problems.join()).toMatch(/at least 150/);
+  });
+});
+
+describe("spoken-line fingerprints (saved skills keep these instead of speech)", () => {
+  const line =
+    "So here is the one budgeting rule that changed everything for me this year, honestly, and it works";
+  const fps = spokenFingerprints([line, "too short to matter"]);
+
+  it("store no speech: fixed-length hashes only", () => {
+    expect(fps.length).toBeGreaterThan(0);
+    for (const fp of fps) expect(fp).toMatch(/^[0-9a-f]{16}$/);
+    expect(JSON.stringify(fps)).not.toMatch(/budget|rule/);
+    expect(spokenFingerprints(["only twelve words here so nothing can ever match at all"])).toEqual(
+      [],
+    );
+  });
+
+  it("flag exactly what longestSharedRun flags: more than 12 shared words", () => {
+    const words = line.split(" ");
+    for (let n = 10; n <= 16; n++) {
+      const copied = `Start with this. ${words.slice(2, 2 + n).join(" ")} and then cut.`;
+      expect(matchesSpokenFingerprints(copied, fps), `${n} words`).toBe(
+        longestSharedRun(copied, [line]) > MAX_SHARED_RUN,
+      );
+    }
+    // Case and punctuation aside, as in v1's check.
+    expect(matchesSpokenFingerprints(line.toUpperCase().replace(/,/g, ";"), fps)).toBe(true);
+    expect(matchesSpokenFingerprints(line, [])).toBe(false);
+  });
+
+  it("checkPass2 uses them alongside spoken lines", () => {
+    const words = line.split(" ").slice(0, 14).join(" ");
+    const prompt = Array.from({ length: 20 }, (_, i) => `${i + 1}. Cut the footage tightly here.`);
+    prompt[3] = `4. Say "${words}" at the start.`;
+    const out = {
+      cardboard_prompt: [...prompt, "x ".repeat(40)].join("\n"),
+      assets_needed: [],
+      watch_outs: ["-"],
+      shot_list: [],
+    };
+    const withFps = checkPass2(out, { spokenLines: [], spokenFingerprints: fps, language: "en" });
+    expect(withFps.problems.join()).toContain("13 or more consecutive words");
+    const without = checkPass2(out, { spokenLines: [], language: "en" });
+    expect(without.problems.join()).not.toContain("consecutive words");
   });
 });

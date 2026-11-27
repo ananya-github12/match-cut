@@ -1,4 +1,6 @@
 /** In-memory implementations for unit tests and lifecycle tests without Docker. */
+import { sameSettings } from "./db/playbook-store.js";
+import { definedOnly, storageSafe } from "./storage-safe.js";
 import type {
   BriefEvents,
   BriefPatch,
@@ -9,7 +11,9 @@ import type {
   KV,
   PlaybookPatch,
   PlaybookRecord,
+  PlaybookSettings,
   PlaybookStore,
+  PlaybookUpdateOptions,
   SkillPatch,
   SkillRecord,
   SkillStore,
@@ -111,16 +115,18 @@ export class MemoryJobQueue implements JobQueue {
 export class MemoryPlaybookStore implements PlaybookStore {
   readonly rows = new Map<string, PlaybookRecord>();
   async create(rec: PlaybookRecord) {
-    this.rows.set(rec.id, clone(rec));
+    if (this.rows.has(rec.id)) throw new Error(`playbook ${rec.id} already exists`);
+    this.rows.set(rec.id, storageSafe(clone(rec)));
   }
   async get(id: string) {
     const r = this.rows.get(id);
     return r ? clone(r) : null;
   }
-  async update(id: string, patch: PlaybookPatch) {
+  async update(id: string, patch: PlaybookPatch, opts: PlaybookUpdateOptions = {}) {
     const r = this.rows.get(id);
     if (!r) return null;
-    const next = { ...r, ...clone(patch), updatedAt: new Date() };
+    if (opts.onlyIfStatus && !opts.onlyIfStatus.includes(r.status)) return null;
+    const next = { ...r, ...storageSafe(definedOnly(clone(patch))), updatedAt: new Date() };
     this.rows.set(id, next);
     return clone(next);
   }
@@ -137,6 +143,31 @@ export class MemoryPlaybookStore implements PlaybookStore {
     }
     return n;
   }
+  async findRecent(q: {
+    userId: string;
+    channelId: string;
+    settings: PlaybookSettings;
+    since: Date;
+  }) {
+    const hit = [...this.rows.values()]
+      .filter(
+        (r) =>
+          r.userId === q.userId &&
+          r.channel?.id === q.channelId &&
+          r.status === "succeeded" &&
+          r.createdAt >= q.since &&
+          sameSettings(r.settings, q.settings),
+      )
+      .sort(
+        (a, b) =>
+          b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      )[0];
+    return hit ? clone(hit) : null;
+  }
+  async countByUserSince(userId: string, since: Date) {
+    return [...this.rows.values()].filter((r) => r.userId === userId && r.createdAt >= since)
+      .length;
+  }
 }
 
 /** Most recently used (or created) first, then newest, then ID: the same order as Postgres. */
@@ -152,9 +183,10 @@ export function skillOrder(a: SkillRecord, b: SkillRecord): number {
 export class MemorySkillStore implements SkillStore {
   readonly rows = new Map<string, SkillRecord>();
   async create(rec: SkillRecord, limit: number) {
+    if (this.rows.has(rec.id)) throw new Error(`skill ${rec.id} already exists`);
     const mine = [...this.rows.values()].filter((r) => r.userId === rec.userId).length;
     if (mine >= limit) return false;
-    this.rows.set(rec.id, clone(rec));
+    this.rows.set(rec.id, storageSafe(clone(rec)));
     return true;
   }
   async get(id: string) {
@@ -170,9 +202,13 @@ export class MemorySkillStore implements SkillStore {
   async update(id: string, patch: SkillPatch) {
     const r = this.rows.get(id);
     if (!r) return null;
-    const next = { ...r, ...clone(patch), updatedAt: new Date() };
+    const next = { ...r, ...storageSafe(definedOnly(clone(patch))), updatedAt: new Date() };
     this.rows.set(id, next);
     return clone(next);
+  }
+  async markUsed(id: string, at: Date) {
+    const r = this.rows.get(id);
+    if (r) this.rows.set(id, { ...r, lastUsedAt: new Date(at) });
   }
   async delete(id: string) {
     this.rows.delete(id);

@@ -129,12 +129,16 @@ export function skillRecord(over: Partial<SkillRecord> = {}): SkillRecord {
     sourceTitle: "Mock Golden 01",
     snapshot: {
       type: "playbook",
+      generatedAt: "2026-11-20T10:00:00.000Z",
       channel: { id: "UCmockgolden01xxxxxxxxxx", title: "Mock Golden 01", handle: "mockgolden01" },
+      settings: { windowDays: 90, maxVideos: 50, outlierThreshold: 2 },
+      window: { from: "2026-08-22T10:00:00.000Z", to: "2026-11-20T10:00:00.000Z" },
       rules: [RULE],
       houseStyle: "",
       notExplained: ["Timing and trends also play a part."],
       recipePromptTemplate: null,
-      spokenLines: ["internal"],
+      warnings: [{ code: "SMALL_SAMPLE", message: "x" }],
+      spokenFingerprints: ["0123456789abcdef"],
     },
     versions: { playbook: "pb1" },
     lastUsedAt: null,
@@ -179,12 +183,86 @@ export function storeContract(
   make: () => { playbooks: PlaybookStore; skills: SkillStore },
 ) {
   describe(`${label}: playbook store`, () => {
-    it("round-trips every field", async () => {
+    it("round-trips every field, and rejects a duplicate ID", async () => {
       const { playbooks } = make();
       const rec = playbookRecord();
       await playbooks.create(rec);
       expect(await playbooks.get(rec.id)).toEqual(rec);
       expect(await playbooks.get("pb_missing")).toBeNull();
+      await expect(playbooks.create(rec)).rejects.toThrow();
+      await playbooks.delete(rec.id);
+    });
+
+    it("stores text Postgres would reject (NUL, lone surrogates) as U+FFFD", async () => {
+      const { playbooks } = make();
+      const rec = playbookRecord();
+      rec.videos[0]!.title = "bad\u0000title\uD800";
+      await playbooks.create(rec);
+      await playbooks.update(rec.id, { warnings: [{ code: "SMALL_SAMPLE", message: "a\u0000b" }] });
+      const got = (await playbooks.get(rec.id))!;
+      expect(got.videos[0]!.title).toBe("bad\uFFFDtitle\uFFFD");
+      expect(got.warnings[0]!.message).toBe("a\uFFFDb");
+      await playbooks.delete(rec.id);
+    });
+
+    it("leaves undefined fields alone; null clears", async () => {
+      const { playbooks } = make();
+      const rec = playbookRecord({ status: "processing", stage: "watching" });
+      await playbooks.create(rec);
+      const next = await playbooks.update(rec.id, { stage: undefined, content: null });
+      expect(next).toMatchObject({ stage: "watching", content: null });
+      expect((await playbooks.get(rec.id))!.stage).toBe("watching");
+      await playbooks.delete(rec.id);
+    });
+
+    it("updates only while the status allows it (a cancel wins over a late finish)", async () => {
+      const { playbooks } = make();
+      const rec = playbookRecord({ status: "cancelled" });
+      await playbooks.create(rec);
+      const late = await playbooks.update(
+        rec.id,
+        { status: "succeeded" },
+        { onlyIfStatus: ["queued", "processing"] },
+      );
+      expect(late).toBeNull();
+      expect((await playbooks.get(rec.id))!.status).toBe("cancelled");
+      const ok = await playbooks.update(rec.id, { stage: null }, { onlyIfStatus: ["cancelled"] });
+      expect(ok).not.toBeNull();
+      await playbooks.delete(rec.id);
+    });
+
+    it("finds the user's recent succeeded playbook for a channel and settings", async () => {
+      const { playbooks } = make();
+      const user = `user_recent_${++n}`;
+      const channelId = `UCrecent${n}xxxxxxxxxxxxx`;
+      const channel = { ...playbookRecord().channel!, id: channelId };
+      const at = (h: number) => new Date(Date.UTC(2026, 10, 20, h));
+      const recs = [
+        playbookRecord({ userId: user, channel, createdAt: at(1) }),
+        playbookRecord({ userId: user, channel, createdAt: at(5) }),
+        playbookRecord({ userId: user, channel, createdAt: at(9), status: "failed" }),
+        playbookRecord({
+          userId: user,
+          channel,
+          createdAt: at(10),
+          settings: { windowDays: 30, maxVideos: 50, outlierThreshold: 2 },
+        }),
+        playbookRecord({ userId: `${user}_other`, channel, createdAt: at(11) }),
+      ];
+      for (const r of recs) await playbooks.create(r);
+      const q = { userId: user, channelId, settings: recs[0]!.settings };
+      expect((await playbooks.findRecent({ ...q, since: at(0) }))!.id).toBe(recs[1]!.id);
+      expect(await playbooks.findRecent({ ...q, since: at(6) })).toBeNull();
+      expect(await playbooks.findRecent({ ...q, channelId: "UCnone", since: at(0) })).toBeNull();
+      // The channel column follows channel updates.
+      const moved = `UCmoved${n}xxxxxxxxxxxxxx`;
+      await playbooks.update(recs[1]!.id, { channel: { ...channel, id: moved } });
+      expect((await playbooks.findRecent({ ...q, channelId: moved, since: at(0) }))!.id).toBe(
+        recs[1]!.id,
+      );
+      expect(await playbooks.countByUserSince(user, at(5))).toBe(3);
+      expect(await playbooks.countByUserSince(user, at(0))).toBe(4);
+      for (const r of recs) await playbooks.delete(r.id);
     });
 
     it("updates fields and the update time", async () => {
@@ -199,17 +277,21 @@ export function storeContract(
       expect(next!.warnings).toEqual([]);
       expect(next!.updatedAt.getTime()).toBeGreaterThan(rec.updatedAt.getTime());
       expect(await playbooks.update("pb_missing", { stage: null })).toBeNull();
+      await playbooks.delete(rec.id);
     });
 
     it("deletes one, and old ones for retention", async () => {
       const { playbooks } = make();
-      const old = playbookRecord({ createdAt: new Date("2020-01-01T00:00:00Z") });
+      // Far in the past, so a shared development database has nothing older.
+      const old = playbookRecord({ createdAt: new Date("2001-01-01T00:00:00Z") });
       const fresh = playbookRecord({ createdAt: new Date() });
       const gone = playbookRecord();
       for (const r of [old, fresh, gone]) await playbooks.create(r);
       await playbooks.delete(gone.id);
       expect(await playbooks.get(gone.id)).toBeNull();
-      expect(await playbooks.deleteOlderThan(new Date("2021-01-01T00:00:00Z"))).toBe(1);
+      expect(
+        await playbooks.deleteOlderThan(new Date("2001-01-02T00:00:00Z")),
+      ).toBeGreaterThanOrEqual(1);
       expect(await playbooks.get(old.id)).toBeNull();
       expect(await playbooks.get(fresh.id)).not.toBeNull();
       await playbooks.delete(fresh.id);
@@ -224,6 +306,7 @@ export function storeContract(
       expect(await skills.create(rec, 50)).toBe(true);
       expect(await skills.get(rec.id)).toEqual(rec);
       expect(await skills.get("sk_missing")).toBeNull();
+      await expect(skills.create(rec, 50)).rejects.toThrow();
       await skills.delete(rec.id);
       expect(await skills.get(rec.id)).toBeNull();
     });
@@ -251,10 +334,33 @@ export function storeContract(
       const c = skillRecord({ userId: user, name: "c", createdAt: at("05") });
       for (const s of [a, b, c]) await skills.create(s, 50);
       expect((await skills.listByUser(user)).map((s) => s.name)).toEqual(["b", "c", "a"]);
-      await skills.update(a.id, { lastUsedAt: at("20") });
+      await skills.markUsed(a.id, at("20"));
       expect((await skills.listByUser(user)).map((s) => s.name)).toEqual(["a", "b", "c"]);
       expect(await skills.listByUser("nobody")).toEqual([]);
       for (const s of [a, b, c]) await skills.delete(s.id);
+    });
+
+    it("breaks ties by ID in byte order, whatever the database collation", async () => {
+      const { skills } = make();
+      const user = `user_tie_${++n}`;
+      const ids = [`sk_tie${n}_a`, `sk_tie${n}__`, `sk_tie${n}_B`];
+      for (const id of ids) await skills.create(skillRecord({ id, userId: user }), 50);
+      // "B" (0x42) < "_" (0x5F) < "a" (0x61).
+      expect((await skills.listByUser(user)).map((s) => s.id)).toEqual([ids[2], ids[1], ids[0]]);
+      for (const id of ids) await skills.delete(id);
+    });
+
+    it("marks a skill used without counting it as an edit", async () => {
+      const { skills } = make();
+      const rec = skillRecord({ userId: `user_used_${++n}` });
+      await skills.create(rec, 50);
+      await skills.markUsed(rec.id, new Date("2026-11-25T00:00:00Z"));
+      const got = (await skills.get(rec.id))!;
+      expect(got.lastUsedAt).toEqual(new Date("2026-11-25T00:00:00Z"));
+      expect(got.updatedAt).toEqual(rec.updatedAt);
+      const renamed = await skills.update(rec.id, { name: "New", snapshot: undefined });
+      expect(renamed).toMatchObject({ name: "New", snapshot: rec.snapshot });
+      await skills.delete(rec.id);
     });
 
     it("updates the name, snapshot and versions", async () => {

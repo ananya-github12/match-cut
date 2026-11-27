@@ -23,13 +23,30 @@ export type PlaybookStage = (typeof PLAYBOOK_STAGES)[number];
 /** PRD: "Handle, channel URL or video URL, max 2,048 characters". */
 export const CHANNEL_INPUT_MAX_CHARS = 2048;
 
+/** Length in characters (code points), as users count them; .max() counts UTF-16 units. */
+const chars = (s: string) => [...s].length;
+
 /**
- * POST /v1/playbooks. `source.mine` (own channel) belongs to M11, which isn't built: it isn't
- * accepted yet, so a request using it fails validation rather than half-working.
+ * POST /v1/playbooks. `source` is a channel (handle, channel URL or video URL) or `mine: true`
+ * (own channel, M11). Until M11, the route answers `mine` with YOUTUBE_NOT_CONNECTED, as the PRD
+ * defines, so clients can build against the final contract.
  */
 export const createPlaybookRequestSchema = z
   .object({
-    source: z.object({ channel: z.string().min(1).max(CHANNEL_INPUT_MAX_CHARS) }).strict(),
+    source: z.union([
+      z
+        .object({
+          channel: z
+            .string()
+            .trim()
+            .min(1)
+            .refine((s) => chars(s) <= CHANNEL_INPUT_MAX_CHARS, {
+              message: `at most ${CHANNEL_INPUT_MAX_CHARS} characters`,
+            }),
+        })
+        .strict(),
+      z.object({ mine: z.literal(true) }).strict(),
+    ]),
     window_days: z
       .number()
       .int()
@@ -56,13 +73,28 @@ export type CreatePlaybookRequest = z.infer<typeof createPlaybookRequestSchema>;
 export const SKILLS_PER_USER = 50;
 export const SKILL_NAME_MAX_CHARS = 80;
 
+/**
+ * A skill name as shown in lists: NFC, no control or invisible formatting characters (zero-width,
+ * bidi overrides), whitespace collapsed and trimmed.
+ */
+export function cleanSkillName(s: string): string {
+  return s
+    .normalize("NFC")
+    .replace(/[\p{Cc}\p{Cf}]/gu, (c) => (/\s/.test(c) ? " " : ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** POST /v1/skills: save a brief's breakdown or a playbook's rules as a named skill. */
 export const createSkillRequestSchema = z
   .object({
     name: z
       .string()
-      .transform((s) => s.replace(/\s+/g, " ").trim())
-      .pipe(z.string().min(1).max(SKILL_NAME_MAX_CHARS)),
+      .transform(cleanSkillName)
+      .refine((s) => chars(s) >= 1, { message: "is empty" })
+      .refine((s) => chars(s) <= SKILL_NAME_MAX_CHARS, {
+        message: `at most ${SKILL_NAME_MAX_CHARS} characters`,
+      }),
     source: z.union([
       z.object({ brief_id: z.string().min(1).max(64) }).strict(),
       z.object({ playbook_id: z.string().min(1).max(64) }).strict(),
@@ -128,16 +160,31 @@ export interface PlaybookResponse {
   };
 }
 
-/** A skill's saved recipe: everything apply needs, so it works after caches and sources expire. */
+/**
+ * A skill's saved recipe: everything apply needs, so it works after caches and sources expire.
+ * `generated_at` is when the source was made, so the app can say how old the rules are.
+ */
 export type SkillSnapshotResponse =
-  | { type: "brief"; video_id: string; video_title: string | null; breakdown: Breakdown }
+  | {
+      type: "brief";
+      generated_at: string;
+      video_id: string;
+      video_title: string | null;
+      breakdown: Breakdown;
+    }
   | {
       type: "playbook";
+      generated_at: string;
       channel: { id: string; title: string; handle: string | null };
+      /** The settings the playbook used; "Refresh from channel" reuses them. */
+      settings: { window_days: number; max_videos: number; outlier_threshold: number };
+      window: { from: string; to: string } | null;
       rules: PlaybookRule[];
       house_style: string;
       not_explained: string[];
       recipe_prompt_template: string | null;
+      /** The playbook's caveats (small sample, shared topic...), kept with its rules. */
+      warnings: { code: string; message: string }[];
     };
 
 /** In GET /v1/skills: what the skills list shows (name, source, last used). */

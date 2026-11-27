@@ -1,6 +1,7 @@
 /**
  * Building a skill from a brief or a playbook (PRD-playbooks.md, Feature 4): a snapshot of what
  * apply needs, plus the versions it was made with, so the skill outlives its source and caches.
+ * Speech is kept only as one-way fingerprints, enough for apply's copy check.
  */
 import {
   COMPARISON_VERSION,
@@ -9,6 +10,7 @@ import {
   PASS2_PROMPT_VERSION,
   PLAYBOOK_VERSION,
   SCHEMA_VERSION,
+  spokenFingerprints,
 } from "@match-cut/core";
 import type { BriefRecord, PlaybookRecord, SkillSnapshot } from "./types.js";
 
@@ -27,10 +29,11 @@ export function skillFromBrief(b: BriefRecord): SkillDraft | SkillDraftProblem {
   return {
     snapshot: {
       type: "brief",
+      generatedAt: b.createdAt.toISOString(),
       videoId: b.videoId,
       videoTitle: b.video?.title ?? null,
       breakdown: b.breakdown,
-      spokenLines: b.spokenLines ?? [],
+      spokenFingerprints: spokenFingerprints(b.spokenLines ?? []),
     },
     sourceTitle: b.video?.title ?? null,
     versions: {
@@ -48,12 +51,16 @@ export function skillFromPlaybook(p: PlaybookRecord): SkillDraft | SkillDraftPro
   return {
     snapshot: {
       type: "playbook",
+      generatedAt: p.createdAt.toISOString(),
       channel: { id: p.channel.id, title: p.channel.title, handle: p.channel.handle },
+      settings: p.settings,
+      window: p.window && { from: p.window.from, to: p.window.to },
       rules: p.content.rules,
       houseStyle: p.content.house_style,
       notExplained: p.content.not_explained,
       recipePromptTemplate: p.content.recipe_prompt_template,
-      spokenLines: p.spokenLines ?? [],
+      warnings: p.warnings,
+      spokenFingerprints: spokenFingerprints(p.spokenLines ?? []),
     },
     sourceTitle: p.channel.title,
     versions: {

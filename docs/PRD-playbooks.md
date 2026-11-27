@@ -338,7 +338,9 @@ Storage notes (M10.5):
 - **`videos[]`**: lists Shorts only. Long uploads are left out (`MIXED_FORMATS` warns about them). Uploads under 7 days old are listed as `other` with a null `outlier_score`; `window.too_new` counts them.
 - **`progress`**: a top-level field, set only during `watching`. `stage` is shown only while the playbook is queued or processing, as for briefs.
 - **`meta`**: `versions` (pass 1, schema, features, comparison, playbook), `models` (pass 1, features, playbook), `cached`, `timings_ms`, `tokens`, `cost_usd`, `created_at`.
-- **`source.mine`** (M11) isn't accepted yet: the request fails validation until own-channel insights are built.
+- **`source`** is `{ channel }` (trimmed, 1 to 2,048 characters) or `{ mine: true }`. Until M11 the API answers `mine` with `YOUTUBE_NOT_CONNECTED`, as defined above, so clients can build against the final contract.
+- **Lookups**: the channel ID is also stored in its own column, so the 24-hour repeat lookup (same user, channel and settings, `succeeded`) and the per-user daily count are indexed queries. Updates can be made conditional on the current status, so a late worker write can't undo a cancel.
+- **Linked briefs**: the pass 1 briefs created for compared videos follow v1's brief retention (90 days). They hold the video's title, channel and breakdown, which are metadata, not statistics.
 
 ## Feature 4: Saved skills (M10)
 
@@ -351,8 +353,16 @@ A skill is a named, reusable recipe: either a brief's breakdown or a playbook's 
 
 Storage notes (M10.5, for sign-off):
 
-- **Snapshot**: a skill copies what apply needs. For a brief: the video ID, title and breakdown. For a playbook: the channel's ID, title and handle, the rules (with their evidence counts and example moments), house style, "not explained" and the recipe template. It holds no view, like or comment counts, so it isn't YouTube statistics and stays until the user deletes it. The versions behind the source (prompts, schema, features, comparison, playbook) are stored with it.
-- **Internal copy check**: the snapshot also keeps the source's spoken lines (internal, never returned), so apply can still block copied speech after the brief or playbook is gone. Open question below.
+- **Snapshot**: a skill copies what apply needs, plus when its source was made. For a brief: the video ID, title and breakdown. For a playbook:
+  - the channel's ID, title and handle;
+  - the settings and window it used, so "Refresh from channel" can repeat them;
+  - the rules, with their evidence counts and example moments;
+  - house style, "not explained" and the recipe template;
+  - the playbook's warnings, so a small-sample or topic caveat stays with the rules.
+
+  The versions behind the source (prompts, schema, features, comparison, playbook) are stored with it.
+- **What a skill does not hold**: no view, like or comment counts, so it stays until the user deletes it. The rules' evidence counts (how many compared videos had each edit choice) are derived from which videos were breakouts. Keeping them is a deliberate choice, pending the YouTube API policy question below.
+- **No speech**: apply's check against copied speech (no run of more than 12 words) uses one-way fingerprints of every 13-word run of the source's spoken lines, never the lines themselves. The fingerprints flag exactly what the v1 check flags.
 - **Sources**: a brief can become a skill once it has a breakdown (`succeeded` or `partial`). A playbook can once it has `succeeded` with at least one rule; a playbook with no clear pattern has nothing to reuse.
 - **Names** are user-written, so they're encrypted at rest with the goal key, like goals. Trimmed, whitespace collapsed, 1 to 80 characters.
 - **Limit**: the 50-per-user check and the insert run under a per-user lock, so two saves at once can't both take the last slot.
@@ -365,12 +375,12 @@ Storage notes (M10.5, for sign-off):
 | `id`, `name` | |
 | `source` | `type` (`brief` or `playbook`), `id`, `title` (the video's or channel's title) |
 | `last_used_at`, `created_at`, `updated_at` | ISO 8601; `last_used_at` is null until the first apply |
-| `snapshot` | `GET /v1/skills/{id}` and `POST /v1/skills` only. Brief: `video_id`, `video_title`, `breakdown`. Playbook: `channel`, `rules`, `house_style`, `not_explained`, `recipe_prompt_template` |
+| `snapshot` | `GET /v1/skills/{id}` and `POST /v1/skills` only. Both have `generated_at` (when the source was made). Brief: `video_id`, `video_title`, `breakdown`. Playbook: `channel`, `settings` (`window_days`, `max_videos`, `outlier_threshold`), `window` (`from`, `to`), `rules`, `house_style`, `not_explained`, `recipe_prompt_template`, `warnings` |
 | `versions` | Same endpoints only: the versions behind the source |
 
 `GET /v1/skills` returns the list without `snapshot` and `versions`.
 
-`POST /v1/skills` request: `name` (string, 1 to 80 characters after trimming) and `source`, which is either `{ brief_id }` or `{ playbook_id }`.
+`POST /v1/skills` request: `name` and `source`, which is either `{ brief_id }` or `{ playbook_id }`. The name is cleaned before checking: NFC, control and invisible formatting characters removed, whitespace collapsed and trimmed. It must then be 1 to 80 characters, counted as characters, not UTF-16 units.
 
 ## Feature 5: Own-channel insights (M11)
 
@@ -502,7 +512,7 @@ Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook,
 ## Open questions
 
 - [ ] Sign-off on the two changed v1 non-goals.
-- [ ] Skill snapshots keep the source's spoken lines (internal) so apply can block copied speech after the source is deleted. That outlives brief retention (90 days). Keep them, drop them after 90 days (and skip the copy check), or re-derive them on apply?
+- [ ] Skill snapshots keep rule evidence counts and example video IDs, which are derived from which videos had the most views, for as long as the skill exists. Is that allowed by the YouTube API Developer Policies, or should skills drop the counts after 30 days?
 - [ ] Is there a reliable Shorts signal in the YouTube API, or is duration the only option?
 - [ ] Should pass 1 answer the first-second features directly (text on screen, face, first words)? The breakdown often doesn't state them, so grounded extraction answers `unknown`. Asking pass 1 changes its schema and cache, so it needs sign-off.
 - [ ] Is subscribers gained available per video in the YouTube Analytics API for Shorts?

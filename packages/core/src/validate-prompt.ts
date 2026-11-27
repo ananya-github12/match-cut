@@ -5,6 +5,7 @@
  * Shot list checks: PRD-playbooks.md, Feature 2 (4 to 15 shots, valid beats, total within 25%
  * of the target length).
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   pass2CoreSchema,
@@ -92,6 +93,39 @@ const tokens = (s: string) =>
     .split(/\s+/)
     .filter(Boolean);
 
+/** Words in a fingerprinted run: one more than the longest allowed shared run. */
+export const SPOKEN_FINGERPRINT_WORDS = MAX_SHARED_RUN + 1;
+
+const fingerprint = (words: string[]) =>
+  createHash("sha256").update(words.join(" ")).digest("hex").slice(0, 16);
+
+/**
+ * One-way fingerprints of every run of 13 words in the spoken lines. Enough to detect a run of
+ * more than 12 shared words (exactly what longestSharedRun flags) without keeping the speech:
+ * saved skills store these instead of the lines. Lines under 13 words can't produce such a run.
+ */
+export function spokenFingerprints(lines: string[]): string[] {
+  const out = new Set<string>();
+  for (const line of lines) {
+    const t = tokens(line);
+    for (let i = 0; i + SPOKEN_FINGERPRINT_WORDS <= t.length; i++) {
+      out.add(fingerprint(t.slice(i, i + SPOKEN_FINGERPRINT_WORDS)));
+    }
+  }
+  return [...out].sort();
+}
+
+/** True when `text` shares a run of more than 12 words with the fingerprinted speech. */
+export function matchesSpokenFingerprints(text: string, fingerprints: readonly string[]): boolean {
+  if (fingerprints.length === 0) return false;
+  const known = new Set(fingerprints);
+  const t = tokens(text);
+  for (let i = 0; i + SPOKEN_FINGERPRINT_WORDS <= t.length; i++) {
+    if (known.has(fingerprint(t.slice(i, i + SPOKEN_FINGERPRINT_WORDS)))) return true;
+  }
+  return false;
+}
+
 /** Longest run of consecutive words shared by `text` and any of `lines`. */
 export function longestSharedRun(text: string, lines: string[]): number {
   const t = tokens(text);
@@ -137,6 +171,8 @@ export interface Pass2Check {
 
 export interface Pass2CheckOptions {
   spokenLines: string[];
+  /** Fingerprints of speech (saved skills), checked alongside spokenLines. */
+  spokenFingerprints?: readonly string[];
   language: string;
   /** Beats in the breakdown, for maps_to_beat. Omit to skip that check. */
   beatCount?: number;
@@ -192,9 +228,12 @@ function checkShotList(
         problems.push(`shot_list[${i}].${field} contains instructions; describe the shot only`);
     }
   });
-  const run = longestSharedRun(
-    shots.map((s) => `${s.shot}\n${s.notes}`).join("\n"),
-    opts.spokenLines,
+  const shotText = shots.map((s) => `${s.shot}\n${s.notes}`).join("\n");
+  const run = Math.max(
+    longestSharedRun(shotText, opts.spokenLines),
+    matchesSpokenFingerprints(shotText, opts.spokenFingerprints ?? [])
+      ? SPOKEN_FINGERPRINT_WORDS
+      : 0,
   );
   if (run > MAX_SHARED_RUN) {
     problems.push(
@@ -246,13 +285,11 @@ export function checkPass2(normalized: unknown, opts: Pass2CheckOptions): Pass2C
       );
   }
   if (out.watch_outs.length === 0) problems.push("watch_outs needs at least one item");
-  const run = longestSharedRun(
-    [prompt, ...out.assets_needed, ...out.watch_outs].join("\n"),
-    opts.spokenLines,
-  );
-  if (run > MAX_SHARED_RUN) {
+  const outText = [prompt, ...out.assets_needed, ...out.watch_outs].join("\n");
+  const run = longestSharedRun(outText, opts.spokenLines);
+  if (run > MAX_SHARED_RUN || matchesSpokenFingerprints(outText, opts.spokenFingerprints ?? [])) {
     problems.push(
-      `the output repeats ${run} consecutive words from the reference's speech; write original wording`,
+      `the output repeats ${run > MAX_SHARED_RUN ? run : `${SPOKEN_FINGERPRINT_WORDS} or more`} consecutive words from the reference's speech; write original wording`,
     );
   }
   const shotsOk = shotCheck.problems.length === 0;

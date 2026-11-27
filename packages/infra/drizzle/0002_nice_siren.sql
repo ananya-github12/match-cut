@@ -8,6 +8,7 @@ CREATE TABLE "playbooks" (
 	"source" jsonb NOT NULL,
 	"settings" jsonb NOT NULL,
 	"force_refresh" boolean DEFAULT false NOT NULL,
+	"channel_id" text,
 	"channel" jsonb,
 	"scoring_window" jsonb,
 	"baseline" jsonb,
@@ -39,4 +40,5 @@ CREATE TABLE "skills" (
 --> statement-breakpoint
 CREATE INDEX "playbooks_user_created_idx" ON "playbooks" USING btree ("user_id","created_at");--> statement-breakpoint
 CREATE INDEX "playbooks_created_at_idx" ON "playbooks" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "playbooks_channel_created_idx" ON "playbooks" USING btree ("channel_id","created_at");--> statement-breakpoint
 CREATE INDEX "skills_user_created_idx" ON "skills" USING btree ("user_id","created_at");

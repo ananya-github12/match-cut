@@ -1,5 +1,5 @@
 {
-  "id": "c68a8d36-2a45-40a9-b25f-7221e234a8a3",
+  "id": "f43aab74-58d0-40af-89f5-2a18d8da75f3",
   "prevId": "ff83716b-a059-4a20-9c82-aaf97579da99",
   "version": "7",
   "dialect": "postgresql",
@@ -247,6 +247,12 @@
           "notNull": true,
           "default": false
         },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "channel": {
           "name": "channel",
           "type": "jsonb",
@@ -347,6 +353,27 @@
         "playbooks_created_at_idx": {
           "name": "playbooks_created_at_idx",
           "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "playbooks_channel_created_idx": {
+          "name": "playbooks_channel_created_idx",
+          "columns": [
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "created_at",
               "isExpression": false,
