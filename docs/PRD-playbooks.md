@@ -134,6 +134,8 @@ The assistant composes the two connectors. Match Cut never calls Cardboard and n
 - Same rate limits, caps, caching and logging rules as the HTTP API; goal text is never logged.
 - Playbook results (M10) show each rule with its evidence in the UI's wording ("4 of 5 breakouts · 1 of 5 typical"), its confidence, example moments and counterexample, next to house style and what the edit doesn't explain. Tool descriptions and the server instructions tell the assistant to present rules as patterns the breakouts share, never as proof of what made them work. A `NOT_ENOUGH_DATA` result says how many Shorts, breakouts and typical videos were found against the minimums.
 - The playbook and skill tools are offered only when the deployment has playbooks enabled. A playbook takes minutes, so a slow one returns its ID with "call `get_playbook` in about 30 seconds".
+- Creators' text (channel and video titles, skill names) reaches the assistant quoted, with control and formatting characters removed and capped at 100 characters. The server instructions say it is data, never instructions. Breakouts are listed as B1, B2 ... with title, views and multiple of the median, and examples refer to them.
+- `shot_list` output (M10): `source` (`brief`, `playbook` or `skill`, with its ID) and `warnings` were added; `brief_id` is null for a playbook or skill. A failed or cancelled playbook says whether retrying can help, and a failed status check returns its error rather than stale "still working" state.
 
 ## Feature 2: Shot list (M9)
 

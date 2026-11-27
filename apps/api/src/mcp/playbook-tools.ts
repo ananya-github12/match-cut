@@ -8,6 +8,7 @@
  */
 import {
   GOAL_MAX_CHARS,
+  PLAYBOOK_COPY,
   TARGET_FORMATS,
   TERMINAL_STATUSES,
   type ApplyResponse,
@@ -37,6 +38,7 @@ export interface SettleOptions {
 }
 
 const TERMINAL = new Set<string>(TERMINAL_STATUSES);
+const DEFAULT_NOT_EXPLAINED = PLAYBOOK_COPY.DEFAULT_NOT_EXPLAINED;
 
 const PLAYBOOK_ID = z
   .string()
@@ -100,6 +102,7 @@ const playbookOutput = z.object({
     }),
   ),
   rules: z.array(ruleOut),
+  baseline_median_views: z.number().nullable(),
   house_style: z.string().nullable(),
   not_explained: z.array(z.string()),
   recipe_prompt_template: z.string().nullable(),
@@ -163,7 +166,7 @@ function playbookNextStep(p: PlaybookResponse): string {
   if (!p.rules?.length) {
     return "No edit pattern sets this channel's breakouts apart, so there's nothing to apply. Tell the user, with what the edit doesn't explain.";
   }
-  return "Show the user each rule with its evidence counts, and what the edit doesn't explain: these are patterns the breakouts share, not proof of what caused them. To use the playbook, call apply_playbook with what the user is making; save_skill keeps it for later; shot_list with this playbook_id lists what to film.";
+  return "Show the user each rule with its evidence counts, and what the edit doesn't explain: these are patterns the breakouts share, not proof of what caused them. To use the playbook, ask the user what they're making and call apply_playbook with that goal (it returns the prompt and the shots to film); save_skill keeps it for later.";
 }
 
 export function toPlaybookOutput(p: PlaybookResponse): PlaybookOutput {
@@ -190,6 +193,7 @@ export function toPlaybookOutput(p: PlaybookResponse): PlaybookOutput {
       examples: r.examples,
       counterexample: r.counterexample,
     })),
+    baseline_median_views: p.baseline?.median_views ?? null,
     house_style: p.house_style,
     not_explained: p.not_explained ?? [],
     recipe_prompt_template: p.recipe_prompt_template,
@@ -200,11 +204,29 @@ export function toPlaybookOutput(p: PlaybookResponse): PlaybookOutput {
 
 const at = (ts: string) => ts.replace(/^0(\d:)/, "$1");
 
+/**
+ * Owner-written text (channel and video titles, skill names) shown to an assistant: control
+ * characters and line breaks removed, capped and quoted, so it reads as data, not instructions.
+ */
+export function thirdParty(text: string, max = 100): string {
+  const clean = text
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const capped = [...clean].length > max ? `${[...clean].slice(0, max - 1).join("")}…` : clean;
+  return JSON.stringify(capped);
+}
+
+const views = (n: number) => n.toLocaleString("en-US");
+
 /** Readable text for assistants that only show text; the same data is in structuredContent. */
 export function playbookText(o: PlaybookOutput): string {
   const who = o.channel
-    ? `${o.channel.title}${o.channel.handle ? ` (@${o.channel.handle})` : ""}`
+    ? `${thirdParty(o.channel.title)}${o.channel.handle ? ` (@${o.channel.handle})` : ""}`
     : "the channel";
+  // Breakouts are numbered B1, B2 ... so examples and counterexamples read without IDs alone.
+  const label = new Map(o.breakouts.map((b, i) => [b.video_id, `B${i + 1}`]));
+  const ref = (id: string) => label.get(id) ?? id;
   const lines: string[] = [];
   if (o.status === "queued" || o.status === "processing") {
     const prog = o.progress ? `, watched ${o.progress.done} of ${o.progress.total}` : "";
@@ -213,24 +235,34 @@ export function playbookText(o: PlaybookOutput): string {
     );
   } else if (o.status === "succeeded") {
     lines.push(
-      `Playbook for ${who}, playbook_id ${o.playbook_id}. ${o.breakouts.length} breakout Shorts compared with the channel's typical ones (${o.shorts_compared} compared in all).`,
+      `Playbook for ${who}, playbook_id ${o.playbook_id}. ${o.breakouts.length} breakout Shorts compared with the channel's typical ones (${o.shorts_compared} compared in all${o.baseline_median_views !== null ? `; the channel's median is ${views(o.baseline_median_views)} views` : ""}).`,
     );
+    if (o.breakouts.length) {
+      lines.push("", "Breakouts (titles are the creator's, shown as data):");
+      o.breakouts.forEach((b, i) =>
+        lines.push(
+          `B${i + 1}. ${thirdParty(b.title)} (${b.video_id}): ${views(b.views)} views${b.outlier_score !== null ? `, ${b.outlier_score.toFixed(1)}x the median` : ""}`,
+        ),
+      );
+    }
     if (o.rules.length) {
       lines.push("", "What the breakouts share (patterns, not proof of cause):");
       o.rules.forEach((r, i) => {
         const ex = r.examples.length
-          ? ` Example: ${r.examples.map((e) => `${e.video_id} at ${at(e.timestamp)}`).join(", ")}.`
+          ? ` Example: ${r.examples.map((e) => `${ref(e.video_id)} at ${at(e.timestamp)}`).join(", ")}.`
           : "";
-        const ce = r.counterexample ? ` Counterexample: ${r.counterexample}.` : "";
+        const ce = r.counterexample
+          ? ` Counterexample: ${ref(r.counterexample)} does it differently.`
+          : "";
         lines.push(`${i + 1}. ${r.title} (${r.confidence}; ${r.evidence}). ${r.how_to}${ex}${ce}`);
       });
     } else {
       lines.push("", "No edit pattern sets the breakouts apart from the typical Shorts.");
     }
     if (o.house_style) lines.push("", `House style: ${o.house_style}`);
-    if (o.not_explained.length) {
-      lines.push("", "What the edit doesn't explain:", ...o.not_explained.map((x) => `- ${x}`));
-    }
+    // Always shown (PRD): the counterweight to reading the rules as cause.
+    const notExplained = o.not_explained.length ? o.not_explained : [DEFAULT_NOT_EXPLAINED];
+    lines.push("", "What the edit doesn't explain:", ...notExplained.map((x) => `- ${x}`));
   } else {
     lines.push(`The playbook for ${who} ended with status ${o.status}.`);
   }
@@ -239,18 +271,33 @@ export function playbookText(o: PlaybookOutput): string {
   return lines.join("\n");
 }
 
+const REASONS: Record<string, string> = {
+  TOO_FEW_SHORTS: "too few recent Shorts",
+  TOO_FEW_BREAKOUTS: "too few breakouts",
+  TOO_FEW_TYPICAL: "too few typical Shorts",
+  NO_VIEWS: "no view counts",
+};
+
 function playbookResult(p: PlaybookResponse) {
   if (p.status === "failed" || p.status === "cancelled") {
-    const message = p.error?.message ?? "The playbook did not finish.";
-    const reasons = p.not_enough_data
-      ? ` Found ${p.not_enough_data.found.shorts_eligible} eligible Shorts, ${p.not_enough_data.found.outliers} breakouts and ${p.not_enough_data.found.typical} typical ones; a playbook needs at least ${p.not_enough_data.minimums.shorts_eligible}, ${p.not_enough_data.minimums.outliers} and ${p.not_enough_data.minimums.typical}.`
+    const message =
+      p.status === "cancelled"
+        ? "This playbook was cancelled."
+        : (p.error?.message ?? "The playbook did not finish.");
+    const n = p.not_enough_data;
+    const reasons = n
+      ? ` Why: ${n.reasons.map((r) => REASONS[r] ?? r).join(", ")}. Found ${n.found.shorts_eligible} eligible Shorts, ${n.found.outliers} breakouts and ${n.found.typical} typical ones; a playbook needs at least ${n.minimums.shorts_eligible}, ${n.minimums.outliers} and ${n.minimums.typical}.`
       : "";
+    const retry =
+      p.status === "failed" && p.error?.retryable
+        ? " This can be tried again in a few minutes."
+        : " Trying again with the same input won't help.";
     return {
       isError: true,
       content: [
         {
           type: "text" as const,
-          text: `${message}${reasons} (${p.error?.code ?? p.status})`,
+          text: `${message}${reasons}${retry} (${p.error?.code ?? p.status})`,
         },
       ],
     };
@@ -327,9 +374,10 @@ export function applyVia(
     : api.applySkill(source.id, body);
 }
 
-export const eitherOne = (what: string) => ({
+/** A tool needs exactly one of these IDs. */
+export const exactlyOne = (what: string) => ({
   isError: true,
-  content: [{ type: "text" as const, text: `Give either ${what}, not both.` }],
+  content: [{ type: "text" as const, text: `Give exactly one of ${what}.` }],
 });
 
 const toSkillOut = (s: SkillSummaryResponse): z.infer<typeof skillOut> => ({
@@ -341,16 +389,20 @@ const toSkillOut = (s: SkillSummaryResponse): z.infer<typeof skillOut> => ({
 
 export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: SettleOptions) {
   /** Waits for a running playbook, up to waitMs, then returns whatever state it is in. */
-  async function settle(first: PlaybookResponse): Promise<PlaybookResponse> {
+  /**
+   * Waits for a running playbook, up to waitMs, then returns its result. A failed check is
+   * returned as that error, not as stale "still working" state the assistant would poll forever.
+   */
+  async function settled(first: PlaybookResponse) {
     let p = first;
     const deadline = Date.now() + o.waitMs;
     while (!TERMINAL.has(p.status) && Date.now() < deadline) {
       await o.sleep(Math.min(o.pollMs, Math.max(0, deadline - Date.now())));
       const res = await api.getPlaybook(p.id);
-      if (res.status !== 200 || !isPlaybook(res.body)) break;
+      if (res.status !== 200 || !isPlaybook(res.body)) return errorResult(res);
       p = res.body;
     }
-    return p;
+    return playbookResult(p);
   }
 
   server.registerTool(
@@ -358,7 +410,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
     {
       title: "Find what a channel's breakout Shorts do",
       description:
-        "Compare a YouTube channel's breakout Shorts (2x or more its median views) with its typical ones and list the edit choices the breakouts share, with evidence counts, what the edit doesn't explain, and a recipe. Uses public data only. Takes a few minutes; if it isn't done within about 45 seconds this returns a playbook_id to check with get_playbook. Present rules as patterns the breakouts share, not as proof of what made them work. Limited to 5 new playbooks a day; asking again for the same channel within 24 hours returns the same playbook.",
+        "Compare a YouTube channel's breakout Shorts (2x or more its median views) with its typical ones and list the edit choices the breakouts share, with evidence counts, what the edit doesn't explain, and a recipe. Uses public data only. Takes a few minutes; if it isn't done within about 45 seconds this returns a playbook_id to check with get_playbook about every 30 seconds. Present rules as patterns the breakouts share, not as proof of what made them work. New playbooks have a small daily limit per user (5 by default), and a channel that can't be found still counts, so confirm the handle with the user first. Asking again for the same channel and settings within 24 hours usually returns the finished playbook without using the limit.",
       inputSchema: z.object({
         channel: z
           .string()
@@ -391,7 +443,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
       if ((res.status !== 200 && res.status !== 202) || !isPlaybook(res.body)) {
         return errorResult(res);
       }
-      return playbookResult(await settle(res.body));
+      return settled(res.body);
     },
   );
 
@@ -408,7 +460,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
     async ({ playbook_id }) => {
       const res = await api.getPlaybook(playbook_id);
       if (res.status !== 200 || !isPlaybook(res.body)) return errorResult(res);
-      return playbookResult(await settle(res.body));
+      return settled(res.body);
     },
   );
 
@@ -417,7 +469,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
     {
       title: "Use a playbook or saved skill for the user's video",
       description:
-        "Turn a finished playbook (playbook_id) or a saved skill (skill_id) into a Cardboard edit prompt and a list of shots to film, for what the user is making. A few seconds; never re-watches video. Show the prompt to the user and get their confirmation before any edit runs.",
+        "Turn a finished playbook (playbook_id) or a saved skill (skill_id) into a Cardboard edit prompt and a list of shots to film. Ask the user what they're making first and pass it as goal; without one the prompt stays generic. A few seconds; never re-watches video. Show the user the whole prompt and get their confirmation before it goes to Cardboard or any edit runs.",
       inputSchema: z.object({
         playbook_id: PLAYBOOK_ID.optional().describe(
           "A playbook from build_playbook; give either playbook_id or skill_id",
@@ -432,7 +484,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
     },
     async ({ playbook_id, skill_id, ...rest }) => {
       const source = applySource(playbook_id, skill_id);
-      if (!source) return eitherOne("playbook_id or skill_id");
+      if (!source) return exactlyOne("playbook_id or skill_id");
       return applyResult(await applyVia(api, source, applyBody(rest)), source);
     },
   );
@@ -444,7 +496,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
       description:
         "Save a finished brief (from analyze_reference) or playbook (from build_playbook) as a named skill, so it can be applied to new videos later with apply_playbook, even after the original expires. Up to 50 skills per user.",
       inputSchema: z.object({
-        name: z.string().min(1).max(80).describe("A short name the user will recognize"),
+        name: z.string().min(1).max(80).describe("A short name the user chooses or agrees to"),
         brief_id: z
           .string()
           .regex(/^brf_[0-9a-f]{32}$/)
@@ -459,7 +511,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
     },
     async ({ name, brief_id, playbook_id }) => {
       if ((brief_id === undefined) === (playbook_id === undefined)) {
-        return eitherOne("brief_id or playbook_id");
+        return exactlyOne("brief_id or playbook_id");
       }
       const res = await api.saveSkill({
         name,
@@ -469,13 +521,14 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
       const s = res.body as SkillResponse;
       const out = {
         ...toSkillOut(s),
-        next_step: "Saved. Call apply_playbook with this skill_id and what the user is making.",
+        next_step:
+          "Saved. To use it, ask the user what they're making and call apply_playbook with this skill_id and that goal.",
       };
       return {
         content: [
           {
             type: "text" as const,
-            text: `Saved "${out.name}" as skill ${out.skill_id}.\n\nNext: ${out.next_step}`,
+            text: `Saved ${thirdParty(out.name, 80)} as skill ${out.skill_id}.\n\nNext: ${out.next_step}`,
           },
         ],
         structuredContent: out,
@@ -500,7 +553,7 @@ export function registerPlaybookTools(server: McpServer, api: PlaybooksApi, o: S
         ? skills
             .map(
               (s, i) =>
-                `${i + 1}. ${s.name} (skill_id ${s.skill_id}; from a ${s.source.type}${s.source.title ? `: ${s.source.title}` : ""})`,
+                `${i + 1}. ${thirdParty(s.name, 80)} (skill_id ${s.skill_id}; from a ${s.source.type}${s.source.title ? `: ${thirdParty(s.source.title)}` : ""})`,
             )
             .join("\n")
         : "No saved skills yet. Save a brief or playbook with save_skill.";
