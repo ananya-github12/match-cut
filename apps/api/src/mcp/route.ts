@@ -8,12 +8,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { buildMcpServer, type ApiResult, type BriefsApi, type McpToolOptions } from "./tools.js";
+import { buildMcpServer, type ApiResult, type MatchCutApi, type McpToolOptions } from "./tools.js";
 
 export interface McpRouteOptions extends McpToolOptions {
   keys: string[];
   /** Used to call the /v1 routes in-process on behalf of the key's user. */
   devToken: string;
+  /** Playbook and skill routes are registered: offer their tools too. */
+  playbooks?: boolean;
 }
 
 /** Org every MCP user belongs to, so connector use has its own org-wide limit. */
@@ -41,14 +43,23 @@ function rpcError(reply: FastifyReply, http: number, message: string) {
   return reply.status(http).send({ jsonrpc: "2.0", error: { code: -32000, message }, id: null });
 }
 
-/** The /v1 brief routes, called in-process as this user. */
-function injectApi(app: FastifyInstance, devToken: string, userId: string): BriefsApi {
+/** The /v1 routes, called in-process as this user. */
+function injectApi(
+  app: FastifyInstance,
+  devToken: string,
+  userId: string,
+  playbooks: boolean,
+): MatchCutApi {
   const headers = {
     authorization: `Bearer ${devToken}`,
     "x-dev-user-id": userId,
     "x-dev-org-id": MCP_ORG_ID,
   };
-  async function call(method: "GET" | "POST", url: string, payload?: object): Promise<ApiResult> {
+  async function call(
+    method: "GET" | "POST" | "DELETE",
+    url: string,
+    payload?: object,
+  ): Promise<ApiResult> {
     const res = await app.inject({ method, url, headers, payload });
     let body: unknown = null;
     try {
@@ -58,10 +69,21 @@ function injectApi(app: FastifyInstance, devToken: string, userId: string): Brie
     }
     return { status: res.statusCode, body };
   }
+  const id = encodeURIComponent;
+  const briefs = {
+    create: (body: object) => call("POST", "/v1/briefs", body),
+    get: (b: string) => call("GET", `/v1/briefs/${id(b)}`),
+    regenerate: (b: string, body: object) => call("POST", `/v1/briefs/${id(b)}/regenerate`, body),
+  };
+  if (!playbooks) return briefs;
   return {
-    create: (body) => call("POST", "/v1/briefs", body),
-    get: (id) => call("GET", `/v1/briefs/${encodeURIComponent(id)}`),
-    regenerate: (id, body) => call("POST", `/v1/briefs/${encodeURIComponent(id)}/regenerate`, body),
+    ...briefs,
+    createPlaybook: (body) => call("POST", "/v1/playbooks", body),
+    getPlaybook: (p) => call("GET", `/v1/playbooks/${id(p)}`),
+    applyPlaybook: (p, body) => call("POST", `/v1/playbooks/${id(p)}/apply`, body),
+    saveSkill: (body) => call("POST", "/v1/skills", body),
+    listSkills: () => call("GET", "/v1/skills"),
+    applySkill: (s, body) => call("POST", `/v1/skills/${id(s)}/apply`, body),
   };
 }
 
@@ -77,7 +99,7 @@ export async function mcpRoutes(app: FastifyInstance, opts: McpRouteOptions) {
       reply.header("www-authenticate", 'Bearer realm="match-cut-mcp"');
       return rpcError(reply, 401, "Missing or invalid Match Cut API key.");
     }
-    const api = injectApi(app, opts.devToken, mcpUserId(key));
+    const api = injectApi(app, opts.devToken, mcpUserId(key), opts.playbooks ?? false);
     const server = buildMcpServer(api, opts);
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);

@@ -118,11 +118,11 @@ The assistant composes the two connectors. Match Cut never calls Cardboard and n
 | `analyze_reference` | `url`, optional `goal`, `format`, `length_seconds`, `clip_start_seconds`, `clip_end_seconds` | The brief: prompt, beats, assets needed, watch-outs. If not done within the wait limit, a brief ID and "still working" |
 | `get_brief` | `brief_id` | Status, or the finished brief |
 | `regenerate_prompt` | `brief_id`, `goal`, `format`, `length_seconds` | A new prompt from the stored breakdown |
-| `shot_list` | `brief_id`, optional `goal`, `format`, `length_seconds` (M9); `playbook_id` or `skill_id` (M10) | Ordered list of shots to film, with total length. A new goal, format or length rewrites the brief's prompt too. Briefs without a list get one written, once |
+| `shot_list` | Exactly one of `brief_id` (M9), `playbook_id` or `skill_id` (M10); optional `goal`, `format`, `length_seconds` | Ordered list of shots to film, with total length. For a brief, a new goal, format or length rewrites the brief's prompt too, and briefs without a list get one written, once. For a playbook or skill, the shots come from apply and serve the prompt's steps |
 | `build_playbook` | `channel` (handle, channel URL or video URL), optional `window_days`, `max_videos` | Playbook, or a playbook ID and "still working" (M10) |
 | `get_playbook` | `playbook_id` | Status, or the finished playbook (M10) |
-| `apply_playbook` | `playbook_id` or `skill_id`, `goal`, `format`, `length_seconds` | Cardboard prompt and shot list (M10) |
-| `save_skill`, `list_skills` | `name` plus `brief_id` or `playbook_id`; none | The saved skill; the user's skills (M10) |
+| `apply_playbook` | Exactly one of `playbook_id` or `skill_id`; optional `goal`, `format`, `length_seconds`, `language` | Cardboard prompt and shot list (M10) |
+| `save_skill`, `list_skills` | `name` plus exactly one of `brief_id` or `playbook_id`; none | The saved skill; the user's skills (M10) |
 
 **Rules**
 
@@ -132,6 +132,8 @@ The assistant composes the two connectors. Match Cut never calls Cardboard and n
 - Transport: remote MCP over HTTPS at `/mcp` on the API service. Verify the current MCP transport and auth requirements for Claude and ChatGPT connectors before building.
 - Auth: an API key per user or team from `MCP_API_KEYS`, sent as `Authorization: Bearer <key>` (Claude's custom connectors send fixed request headers). Each key is its own user, with its own briefs and rate limits, in a separate `mcp` org for org-wide limits. No keys configured means the endpoint is off. Anonymous access was rejected because anyone with the URL could spend the Gemini budget. Production moves to OAuth with Cardboard identity once available. No Gemini or YouTube key is ever exposed.
 - Same rate limits, caps, caching and logging rules as the HTTP API; goal text is never logged.
+- Playbook results (M10) show each rule with its evidence in the UI's wording ("4 of 5 breakouts · 1 of 5 typical"), its confidence, example moments and counterexample, next to house style and what the edit doesn't explain. Tool descriptions and the server instructions tell the assistant to present rules as patterns the breakouts share, never as proof of what made them work. A `NOT_ENOUGH_DATA` result says how many Shorts, breakouts and typical videos were found against the minimums.
+- The playbook and skill tools are offered only when the deployment has playbooks enabled. A playbook takes minutes, so a slow one returns its ID with "call `get_playbook` in about 30 seconds".
 
 ## Feature 2: Shot list (M9)
 

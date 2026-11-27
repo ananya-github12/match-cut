@@ -11,6 +11,14 @@ import {
 } from "@match-cut/core";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
+import {
+  applyBody,
+  applySource,
+  applyVia,
+  eitherOne,
+  registerPlaybookTools,
+  type PlaybooksApi,
+} from "./playbook-tools.js";
 
 /** What the tools need from the API: the /v1/briefs routes, called in-process. */
 export interface BriefsApi {
@@ -23,6 +31,9 @@ export interface ApiResult {
   body: unknown;
 }
 
+/** Briefs, plus playbooks and skills when they're enabled on this deployment. */
+export type MatchCutApi = BriefsApi & Partial<PlaybooksApi>;
+
 export interface McpToolOptions {
   /** How long a tool call waits for a running job before handing back the brief ID. */
   waitMs?: number;
@@ -30,6 +41,13 @@ export interface McpToolOptions {
   pollMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
+
+/** Added to the instructions when the playbook and skill tools are on. */
+export const MCP_PLAYBOOK_INSTRUCTIONS = [
+  "To learn from a channel, call analyze_channel with its handle or a video link: it compares the channel's breakout Shorts with its typical ones and lists the edit choices the breakouts share.",
+  "Present those rules as patterns the breakouts share, with their evidence counts and what the edit doesn't explain, never as proof of what made them work.",
+  "apply_playbook turns a playbook into a prompt and shots to film for the user's video; save_skill keeps a brief or playbook to reuse with apply_skill.",
+].join(" ");
 
 export const MCP_INSTRUCTIONS = [
   "Match Cut studies a YouTube reference video (picture and sound) and writes an edit prompt for Cardboard, an AI video editor.",
@@ -168,7 +186,10 @@ export function toText(o: BriefOutput): string {
 }
 
 const shotListOutput = z.object({
-  brief_id: z.string(),
+  /** The brief the shots are for; null when they came from a playbook or skill. */
+  brief_id: z.string().nullable(),
+  /** Set when the shots came from a playbook or saved skill (M10). */
+  source: z.object({ type: z.enum(["brief", "playbook", "skill"]), id: z.string() }),
   status: briefOutput.shape.status,
   shot_list: z.array(shotOut),
   total_seconds: z.number().nullable(),
@@ -185,16 +206,16 @@ export function shotListText(o: ShotListOutput, title: string | null): string {
   if (o.shot_list.length) {
     const total = o.total_seconds === null ? "" : `, about ${seconds(o.total_seconds)}`;
     lines.push(
-      `Shot list for ${title ? `"${title}"` : "this brief"} (${o.shot_list.length} shots${total}):`,
+      `Shot list for ${title ? `"${title}"` : `this ${o.source.type}`} (${o.shot_list.length} shots${total}):`,
     );
     o.shot_list.forEach((s, i) => {
       const tip = s.notes ? ` Tip: ${s.notes}` : "";
       lines.push(
-        `${i + 1}. [beat ${s.maps_to_beat}, ${seconds(s.duration_seconds)}] ${s.shot}. Framing: ${s.framing}.${tip}`,
+        `${i + 1}. [${o.source.type === "brief" ? "beat" : "step"} ${s.maps_to_beat}, ${seconds(s.duration_seconds)}] ${s.shot}. Framing: ${s.framing}.${tip}`,
       );
     });
   } else {
-    lines.push(`No shot list for brief ${o.brief_id} yet (status: ${o.status}).`);
+    lines.push(`No shot list for ${o.source.type} ${o.source.id} yet (status: ${o.status}).`);
   }
   lines.push("", `Next: ${o.next_step}`);
   return lines.join("\n");
@@ -227,7 +248,18 @@ function briefResult(b: BriefResponse) {
   return { content: [{ type: "text" as const, text: toText(out) }], structuredContent: out };
 }
 
-export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpServer {
+function hasPlaybooks(api: MatchCutApi): api is BriefsApi & PlaybooksApi {
+  return (
+    !!api.createPlaybook &&
+    !!api.getPlaybook &&
+    !!api.applyPlaybook &&
+    !!api.saveSkill &&
+    !!api.listSkills &&
+    !!api.applySkill
+  );
+}
+
+export function buildMcpServer(api: MatchCutApi, opts: McpToolOptions = {}): McpServer {
   const waitMs = opts.waitMs ?? 45_000;
   const pollMs = opts.pollMs ?? 2_000;
   const sleep = opts.sleep ?? defaultSleep;
@@ -245,10 +277,16 @@ export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpSe
     return b;
   }
 
+  const playbooks = hasPlaybooks(api);
   const server = new McpServer(
-    { name: "match-cut", version: "0.1.0" },
-    { instructions: MCP_INSTRUCTIONS },
+    { name: "match-cut", version: "0.2.0" },
+    {
+      instructions: playbooks
+        ? `${MCP_INSTRUCTIONS} ${MCP_PLAYBOOK_INSTRUCTIONS}`
+        : MCP_INSTRUCTIONS,
+    },
   );
+  if (playbooks) registerPlaybookTools(server, api, { waitMs, pollMs, sleep });
 
   server.registerTool(
     "analyze_reference",
@@ -344,9 +382,19 @@ export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpSe
     {
       title: "What to film",
       description:
-        "List the shots the user should film to make their version of the reference, in edit order, with framing, time on screen and the reference beat each one recreates. Use it when the user hasn't filmed yet. Pass a goal, format or length to plan for a different video; this rewrites the brief's prompt too, without re-watching the reference.",
+        "List the shots the user should film, in edit order, with framing and time on screen. For a brief (brief_id), each shot recreates a beat of the reference; a goal, format or length plans for a different video and rewrites the brief's prompt too, without re-watching the reference. For a playbook (playbook_id) or saved skill (skill_id), the shots serve the steps of a prompt written for the user's goal. Use it when the user hasn't filmed yet. Give exactly one of brief_id, playbook_id or skill_id.",
       inputSchema: z.object({
-        brief_id: BRIEF_ID,
+        brief_id: BRIEF_ID.optional(),
+        playbook_id: z
+          .string()
+          .regex(/^pbk_[0-9a-f]{32}$/)
+          .optional()
+          .describe("A playbook from build_playbook"),
+        skill_id: z
+          .string()
+          .regex(/^skl_[0-9a-f]{32}$/)
+          .optional()
+          .describe("A skill from save_skill or list_skills"),
         goal: z
           .string()
           .max(GOAL_MAX_CHARS)
@@ -358,7 +406,32 @@ export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpSe
       outputSchema: shotListOutput,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ brief_id, ...rest }) => {
+    async ({ brief_id, playbook_id, skill_id, ...rest }) => {
+      const given = [brief_id, playbook_id, skill_id].filter((x) => x !== undefined).length;
+      if (given !== 1) return eitherOne("one of brief_id, playbook_id or skill_id");
+      if (brief_id === undefined) {
+        const source = applySource(playbook_id, skill_id)!;
+        if (!playbooks) return eitherOne("brief_id (playbooks aren't enabled here)");
+        const res = await applyVia(api as PlaybooksApi, source, applyBody(rest));
+        if (res.status !== 200) return errorResult(res);
+        const shots = (res.body as { shot_list: ShotListOutput["shot_list"] }).shot_list;
+        const out: ShotListOutput = {
+          brief_id: null,
+          source,
+          status: "succeeded",
+          shot_list: shots,
+          total_seconds: shots.length
+            ? Math.round(shots.reduce((sum, x) => sum + x.duration_seconds, 0) * 10) / 10
+            : null,
+          next_step: shots.length
+            ? "Show the user the list. Once they've filmed, apply_playbook with the same goal gives the Cardboard prompt for the footage."
+            : "No shot list could be made this time. Try again in a minute.",
+        };
+        return {
+          content: [{ type: "text" as const, text: shotListText(out, null) }],
+          structuredContent: out,
+        };
+      }
       const body = regenerateBody(rest);
       let res = Object.keys(body).length
         ? await api.regenerate(brief_id, body)
@@ -377,6 +450,7 @@ export function buildMcpServer(api: BriefsApi, opts: McpToolOptions = {}): McpSe
       const shots = b.shot_list ?? [];
       const out: ShotListOutput = {
         brief_id: b.id,
+        source: { type: "brief", id: b.id },
         status: b.status,
         shot_list: shots,
         total_seconds: shots.length

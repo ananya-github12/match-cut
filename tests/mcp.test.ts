@@ -65,8 +65,13 @@ describe("Match Cut MCP server", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       "analyze_reference",
+      "apply_playbook",
+      "build_playbook",
       "get_brief",
+      "get_playbook",
+      "list_skills",
       "regenerate_prompt",
+      "save_skill",
       "shot_list",
     ]);
     const analyze = tools.find((t) => t.name === "analyze_reference")!;

@@ -149,6 +149,7 @@ export function buildApp(deps: AppDeps) {
     ...deps.mcp,
     keys: deps.mcp?.keys ?? [],
     devToken: deps.devToken,
+    playbooks: deps.playbooks !== undefined,
   });
 
   return app;
