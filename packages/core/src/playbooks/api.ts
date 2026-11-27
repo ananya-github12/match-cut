@@ -5,7 +5,7 @@
 import { z } from "zod";
 import type { Breakdown, BriefStatus } from "../schemas.js";
 import type { PlaybookRule } from "./writing.js";
-import { PLAYBOOK_DEFAULTS, PLAYBOOK_LIMITS } from "./scoring.js";
+import { PLAYBOOK_DEFAULTS, PLAYBOOK_LIMITS, type NotEnoughDataReason } from "./scoring.js";
 
 /** PRD stage list, in order. `watching` carries progress {done, total}. */
 export const PLAYBOOK_STAGES = [
@@ -143,6 +143,15 @@ export interface PlaybookResponse {
     /** The pass 1 brief behind a compared video's breakdown, when one was saved. */
     brief_id: string | null;
   }[];
+  /**
+   * Set with NOT_ENOUGH_DATA (PRD: "with the reasons, how many were found and a suggestion"; the
+   * suggestion is in the error message). Null otherwise.
+   */
+  not_enough_data: {
+    reasons: NotEnoughDataReason[];
+    found: { shorts_eligible: number; outliers: number; typical: number };
+    minimums: { shorts_eligible: number; outliers: number; typical: number };
+  } | null;
   rules: PlaybookRule[] | null;
   house_style: string | null;
   not_explained: string[] | null;

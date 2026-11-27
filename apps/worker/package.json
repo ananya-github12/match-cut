@@ -21,6 +21,8 @@
     "./pipeline": "./src/pipeline.ts",
     "./setup": "./src/setup.ts",
     "./pass1": "./src/pass1.ts",
-    "./pass2": "./src/pass2.ts"
+    "./pass2": "./src/pass2.ts",
+    "./playbook-pipeline": "./src/playbook-pipeline.ts",
+    "./playbook-steps": "./src/playbook-steps.ts"
   }
 }

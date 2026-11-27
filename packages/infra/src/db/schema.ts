@@ -56,6 +56,7 @@ export const playbooks = pgTable(
     // "window" is a reserved word in SQL.
     window: jsonb("scoring_window").$type<PlaybookRecord["window"]>(),
     baseline: jsonb("baseline").$type<PlaybookRecord["baseline"]>(),
+    notEnoughData: jsonb("not_enough_data").$type<PlaybookRecord["notEnoughData"]>(),
     videos: jsonb("videos").$type<PlaybookRecord["videos"]>().notNull().default([]),
     comparison: jsonb("comparison").$type<PlaybookRecord["comparison"]>(),
     content: jsonb("content").$type<PlaybookRecord["content"]>(),

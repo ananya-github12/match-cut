@@ -12,6 +12,7 @@ CREATE TABLE "playbooks" (
 	"channel" jsonb,
 	"scoring_window" jsonb,
 	"baseline" jsonb,
+	"not_enough_data" jsonb,
 	"videos" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"comparison" jsonb,
 	"content" jsonb,

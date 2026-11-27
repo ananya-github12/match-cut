@@ -1,4 +1,10 @@
-import { BRIEF_QUEUE, loadEnv, modelNames, useYouTubeLookup } from "@match-cut/core";
+import {
+  BRIEF_QUEUE,
+  loadEnv,
+  modelNames,
+  PLAYBOOK_QUEUE,
+  useYouTubeLookup,
+} from "@match-cut/core";
 import {
   computeSignals,
   connectPostgres,
@@ -13,11 +19,19 @@ import {
   SafeKV,
   SpendTracker,
   type JobData,
+  type PlaybookJobData,
 } from "@match-cut/infra";
-import { MockVideoLookup, YouTubeDataApiLookup } from "@match-cut/providers";
+import {
+  CachedChannelLookup,
+  MockChannelLookup,
+  MockVideoLookup,
+  YouTubeDataApiChannelLookup,
+  YouTubeDataApiLookup,
+} from "@match-cut/providers";
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { runJob, type PipelineDeps } from "./pipeline.js";
+import { runPlaybookJob } from "./playbook-pipeline.js";
 import { buildAnalyzer, pipelineSettings } from "./setup.js";
 
 const env = loadEnv();
@@ -98,6 +112,47 @@ const worker = new Worker<JobData>(BRIEF_QUEUE, (job) => runJob(job.data, deps),
 });
 worker.on("failed", (job, err) => console.error(`[worker] job ${job?.id} crashed: ${err.message}`));
 
+// Playbooks (PRD-playbooks.md, Feature 3): their own queue, so a 10-video playbook never holds up
+// a brief. Channel data is cached 24 h (CachedChannelLookup); mock mode uses the offline channels.
+const channels = useYouTubeLookup(env)
+  ? new CachedChannelLookup(
+      new YouTubeDataApiChannelLookup({ apiKey: env.YOUTUBE_DATA_API_KEY! }),
+      kv,
+    )
+  : new MockChannelLookup();
+const playbookWorker = new Worker<PlaybookJobData>(
+  PLAYBOOK_QUEUE,
+  (job) =>
+    runPlaybookJob(job.data, {
+      store: playbookStore,
+      kv,
+      events: deps.events,
+      channels,
+      analyzer: deps.analyzer,
+      manifest: deps.manifest,
+      models,
+      budget: deps.budget,
+      queueMaxWaitMs: deps.queueMaxWaitMs,
+      timeoutMs: env.PLAYBOOK_TIMEOUT_SECONDS * 1000,
+      watchConcurrency: env.PLAYBOOK_WATCH_CONCURRENCY,
+      pricing: deps.pricing,
+      spend,
+      log,
+    }),
+  {
+    connection,
+    prefix: `${env.REDIS_NAMESPACE}-bull`,
+    concurrency: env.PLAYBOOK_WORKER_CONCURRENCY,
+    lockDuration: 30_000,
+    stalledInterval: 30_000,
+    // A crashed playbook restarts once; finished videos come back from the caches.
+    maxStalledCount: 1,
+  },
+);
+playbookWorker.on("failed", (job, err) =>
+  console.error(`[worker] playbook job ${job?.id} crashed: ${err.message}`),
+);
+
 // PRD retention: briefs (and their goal text) are deleted after BRIEF_RETENTION_DAYS; playbooks
 // (public YouTube statistics) after PLAYBOOK_RETENTION_DAYS. Saved skills keep only a snapshot of
 // the rules and recipe, with no view counts, so they stay until the user deletes them.
@@ -146,6 +201,7 @@ const shutdown = async () => {
   clearInterval(retentionTimer);
   clearInterval(opsTimer);
   await worker.close();
+  await playbookWorker.close();
   await sql.end({ timeout: 2 });
   for (const r of [connection, redis, sub]) r.disconnect();
   process.exit(0);

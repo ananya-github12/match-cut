@@ -140,6 +140,8 @@ export const PLAYBOOK_WARNINGS = {
   TOPIC_CONFOUND: "Most breakouts share a topic, so the topic may matter as much as the edit.",
   RECIPE_UNAVAILABLE:
     "We couldn't write a ready-made prompt for this playbook. Use Apply to write one for your goal.",
+  VIDEOS_SKIPPED:
+    "{count} of the picked videos couldn't be analyzed, so they were left out of the comparison.",
   NO_CLEAR_PATTERN:
     "We couldn't find an edit choice that clearly sets the breakouts apart from typical videos, so there are no rules to copy yet.",
 } as const;

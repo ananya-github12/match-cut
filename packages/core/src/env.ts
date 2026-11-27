@@ -71,6 +71,12 @@ export const envSchema = z
      * the working assumption until the YouTube API policy's limit is confirmed).
      */
     PLAYBOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    /** Whole-playbook time limit: up to 10 videos watched, 3 at a time, then two text calls. */
+    PLAYBOOK_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(600),
+    /** Playbook jobs one worker runs at once (each watches up to 3 videos in parallel). */
+    PLAYBOOK_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+    /** PRD-playbooks.md: at most 3 concurrent pass 1 calls per playbook. */
+    PLAYBOOK_WATCH_CONCURRENCY: z.coerce.number().int().min(1).max(3).default(3),
     /**
      * Match Cut MCP server (/mcp): comma-separated API keys, each at least 24 characters.
      * Each key is its own user. Empty: the MCP server is off.

@@ -46,3 +46,42 @@ export function pass2CacheKey(
     .slice(0, 32);
   return `p2:${hash}`;
 }
+
+/** PRD-playbooks.md, Cost, limits and caching: features 30 days, playbooks 24 hours. */
+export const FEATURES_TTL_SECONDS = 30 * 24 * 3600;
+export const PLAYBOOK_TTL_SECONDS = 24 * 3600;
+
+/** Features of one breakdown: the pass 1 key plus the feature list's version and the model. */
+export function featuresCacheKey(pass1Key: string, p: { model: string; version: string }): string {
+  return `feat:${p.version}:${p.model}:${pass1Key}`;
+}
+
+/**
+ * A finished playbook for a channel and settings, shared across users for 24 hours: the channel
+ * stats key's parts plus the threshold, every version behind the result, and the models.
+ */
+export function playbookCacheKey(p: {
+  channelId: string;
+  windowDays: number;
+  maxVideos: number;
+  outlierThreshold: number;
+  versions: Record<string, string>;
+  models: Record<string, string>;
+}): string {
+  const sorted = (o: Record<string, string>) =>
+    Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1));
+  const hash = createHash("sha256")
+    .update(
+      JSON.stringify([
+        p.channelId,
+        p.windowDays,
+        p.maxVideos,
+        p.outlierThreshold,
+        sorted(p.versions),
+        sorted(p.models),
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 32);
+  return `pb:${hash}`;
+}

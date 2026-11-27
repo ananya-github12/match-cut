@@ -10,7 +10,7 @@ export {
   type Env,
   type ModelNames,
 } from "./env.js";
-export { BRIEF_QUEUE } from "./queue.js";
+export { BRIEF_QUEUE, PLAYBOOK_QUEUE } from "./queue.js";
 export * from "./errors.js";
 export * from "./youtube-url.js";
 export * from "./youtube-channel.js";

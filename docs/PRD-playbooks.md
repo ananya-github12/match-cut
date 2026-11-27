@@ -326,7 +326,7 @@ Implementation notes (M10.4, for sign-off):
 | `baseline` | `median_views`, `median_engagement_rate` |
 | `videos[]` | `id`, `title`, `published_at`, `views`, `likes` (null if hidden), `comments`, `outlier_score`, `group` (`outlier`, `typical`, `other`), `brief_id` |
 | `rules[]`, `house_style`, `not_explained`, `recipe_prompt_template` | From playbook writing |
-| `warnings[]` | `{code, message}`: `SMALL_SAMPLE` (3 picks on either side, the minimum), `MIXED_FORMATS` (long uploads in the window), `LIKES_HIDDEN` (a compared video hides likes), `RECENT_VIDEOS_EXCLUDED` (uploads under 7 days old), `TOPIC_CONFOUND` (most outliers share a topic), `RECIPE_UNAVAILABLE` (no recipe passed the checks), `NO_CLEAR_PATTERN` (no rule qualified); copy below |
+| `warnings[]` | `{code, message}`: `SMALL_SAMPLE` (3 picks on either side, the minimum), `MIXED_FORMATS` (long uploads in the window), `LIKES_HIDDEN` (a compared video hides likes), `RECENT_VIDEOS_EXCLUDED` (uploads under 7 days old), `TOPIC_CONFOUND` (most outliers share a topic), `RECIPE_UNAVAILABLE` (no recipe passed the checks), `NO_CLEAR_PATTERN` (no rule qualified), `VIDEOS_SKIPPED` (a picked video couldn't be analyzed); copy below |
 | `meta` | Versions, models, timings, tokens, cost, `cached` |
 
 Statuses are v1's. Stages: `resolving_channel`, `fetching_stats`, `scoring`, `watching` (with `progress: {done, total}`), `extracting`, `comparing`, `writing_playbook`, `validating`.
@@ -337,10 +337,27 @@ Storage notes (M10.5):
 - **Retention**: playbooks hold YouTube statistics, so they're deleted after `PLAYBOOK_RETENTION_DAYS` (default 30, the working assumption above).
 - **`videos[]`**: lists Shorts only. Long uploads are left out (`MIXED_FORMATS` warns about them). Uploads under 7 days old are listed as `other` with a null `outlier_score`; `window.too_new` counts them.
 - **`progress`**: a top-level field, set only during `watching`. `stage` is shown only while the playbook is queued or processing, as for briefs.
-- **`meta`**: `versions` (pass 1, schema, features, comparison, playbook), `models` (pass 1, features, playbook), `cached`, `timings_ms`, `tokens`, `cost_usd`, `created_at`.
+- **`meta`**: `versions` (pass 1, schema, features, comparison, playbook, manifest), `models` (pass 1, features, playbook), `cached`, `timings_ms`, `tokens`, `cost_usd`, `created_at`.
+- **`not_enough_data`**: set with `NOT_ENOUGH_DATA`. It has `reasons` (`TOO_FEW_SHORTS`, `TOO_FEW_BREAKOUTS`, `TOO_FEW_TYPICAL`, `NO_VIEWS`), `found` (`shorts_eligible`, `outliers`, `typical`) and `minimums`, as the scoring section asks; the error message carries the suggestion. `window` is filled in too, so the app can show what was seen.
 - **`source`** is `{ channel }` (trimmed, 1 to 2,048 characters) or `{ mine: true }`. Until M11 the API answers `mine` with `YOUTUBE_NOT_CONNECTED`, as defined above, so clients can build against the final contract.
 - **Lookups**: the channel ID is also stored in its own column, so the 24-hour repeat lookup (same user, channel and settings, `succeeded`) and the per-user daily count are indexed queries. Updates can be made conditional on the current status, so a late worker write can't undo a cancel.
-- **Linked briefs**: the pass 1 briefs created for compared videos follow v1's brief retention (90 days). They hold the video's title, channel and breakdown, which are metadata, not statistics.
+- **Linked briefs**: in M10 the pipeline doesn't create briefs for compared videos; their breakdowns live in the shared pass 1 cache, so `videos[].brief_id` is null. If briefs are added later, they follow v1's brief retention (90 days).
+
+Pipeline notes (M10.6):
+
+- **Queue**: playbooks run on their own queue (`playbooks`), so a 10-video playbook never holds up a brief. `PLAYBOOK_WORKER_CONCURRENCY` (2) playbooks per worker, each watching at most `PLAYBOOK_WATCH_CONCURRENCY` (3) videos at once.
+- **Caches**:
+  - Pass 1 uses the brief cache key for a full-length, standard-detail video, so briefs and playbooks share breakdowns.
+  - Features are cached per breakdown for 30 days, keyed by the pass 1 key, the feature version and the model.
+  - A finished playbook is cached for 24 hours for any user with the same channel and settings, keyed by the channel, the settings, every version and the models.
+  - `force_refresh` refetches stats and skips the feature and playbook caches; the pass 1 cache still applies.
+  - Results that used a fallback model, fallback wording or a skipped video are not cached.
+- **One video failing** doesn't sink the playbook: it is left out, and the playbook gets `VIDEOS_SKIPPED`. If that leaves fewer than 3 breakouts or 3 typical videos, the playbook fails with the upstream error, which is retryable: the analysis failed, not the channel.
+- **Writer outage**: the playbook still succeeds. Its rules are computed, the wording is the fallback copy, there's no recipe, and it carries `RECIPE_UNAVAILABLE`. `partial` isn't used, because nothing the user asked for is missing except the recipe, which the warning explains.
+- **Faithfulness**: a playbook that fails the check is a bug. It fails with `INTERNAL` and an ALERT log line, rather than show evidence that doesn't match the comparison.
+- **Limits**: a time limit for the whole playbook (`PLAYBOOK_TIMEOUT_SECONDS`, 600) leads to `UPSTREAM_TIMEOUT`. Each model step (each watch, the extraction, the writing) gets v1's job budget. Queue wait over 120 s leads to `CAPACITY_EXHAUSTED`, as for briefs.
+- **Cancel and crash**: every write is conditional on the playbook still running, so a cancel wins. A job restarted after a worker crash starts from the top, and finished videos come back from the caches.
+
 
 ## Feature 4: Saved skills (M10)
 
@@ -457,6 +474,7 @@ YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
 | `RECENT_VIDEOS_EXCLUDED` | {count} uploads from the last {days} days were left out because they're still gaining views. |
 | `TOPIC_CONFOUND` | Most breakouts share a topic, so the topic may matter as much as the edit. |
 | `RECIPE_UNAVAILABLE` | We couldn't write a ready-made prompt for this playbook. Use Apply to write one for your goal. (added in M10.4) |
+| `VIDEOS_SKIPPED` | {count} of the picked videos couldn't be analyzed, so they were left out of the comparison. (added in M10.6) |
 | `NO_CLEAR_PATTERN` | We couldn't find an edit choice that clearly sets the breakouts apart from typical videos, so there are no rules to copy yet. (added in M10.4) |
 
 ## Frontend additions

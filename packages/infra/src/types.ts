@@ -10,6 +10,7 @@ import type {
   FeatureCount,
   FeatureRow,
   HouseStyle,
+  NotEnoughDataReason,
   Pass2Output,
   PlaybookContent,
   PlaybookRule,
@@ -124,6 +125,15 @@ export interface JobQueue {
   enqueue(job: JobData): Promise<void>;
 }
 
+/** One playbook run (PLAYBOOK_QUEUE). */
+export interface PlaybookJobData {
+  playbookId: string;
+}
+
+export interface PlaybookJobQueue {
+  enqueue(job: PlaybookJobData): Promise<void>;
+}
+
 // ---------- Playbooks (PRD-playbooks.md, Feature 3) ----------
 
 export interface PlaybookSettings {
@@ -155,6 +165,14 @@ export interface PlaybookVideo {
   group: VideoGroup;
   /** The brief holding a compared video's breakdown, when one was saved. */
   briefId: string | null;
+}
+
+export interface PlaybookNotEnoughData {
+  reasons: NotEnoughDataReason[];
+  shortsEligible: number;
+  outliersFound: number;
+  typicalFound: number;
+  minimums: { eligible: number; outliers: number; typical: number };
 }
 
 /** Everything the comparison computed: the evidence table behind the rules, kept for evals. */
@@ -204,6 +222,8 @@ export interface PlaybookRecord {
   channel: PlaybookChannel | null;
   window: ScoringWindow | null;
   baseline: { medianViews: number; medianEngagementRate: number | null } | null;
+  /** Why scoring stopped with NOT_ENOUGH_DATA, and what it found. */
+  notEnoughData: PlaybookNotEnoughData | null;
   videos: PlaybookVideo[];
   comparison: PlaybookComparison | null;
   content: PlaybookStoredContent | null;

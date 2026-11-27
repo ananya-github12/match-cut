@@ -90,6 +90,19 @@ export function toPlaybookResponse(r: PlaybookRecord): PlaybookResponse {
         group: v.group === "outlier" || v.group === "typical" ? v.group : "other",
         brief_id: v.briefId,
       })),
+    not_enough_data: r.notEnoughData && {
+      reasons: r.notEnoughData.reasons,
+      found: {
+        shorts_eligible: r.notEnoughData.shortsEligible,
+        outliers: r.notEnoughData.outliersFound,
+        typical: r.notEnoughData.typicalFound,
+      },
+      minimums: {
+        shorts_eligible: r.notEnoughData.minimums.eligible,
+        outliers: r.notEnoughData.minimums.outliers,
+        typical: r.notEnoughData.minimums.typical,
+      },
+    },
     rules: r.content?.rules ?? null,
     house_style: r.content?.house_style ?? null,
     not_explained: r.content?.not_explained ?? null,

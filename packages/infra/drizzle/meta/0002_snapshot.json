@@ -1,5 +1,5 @@
 {
-  "id": "f43aab74-58d0-40af-89f5-2a18d8da75f3",
+  "id": "c74136b7-643a-4f7f-bebd-a137b9bb8c7c",
   "prevId": "ff83716b-a059-4a20-9c82-aaf97579da99",
   "version": "7",
   "dialect": "postgresql",
@@ -267,6 +267,12 @@
         },
         "baseline": {
           "name": "baseline",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "not_enough_data": {
+          "name": "not_enough_data",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

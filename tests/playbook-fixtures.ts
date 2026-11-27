@@ -61,6 +61,7 @@ export function playbookRecord(over: Partial<PlaybookRecord> = {}): PlaybookReco
       unusable: 0,
     },
     baseline: { medianViews: 1000, medianEngagementRate: 0.05 },
+    notEnoughData: null,
     videos: [
       video("mgold01v000001", "outlier", 5000, 5),
       video("mgold01v000002", "typical", 1000, 1),
