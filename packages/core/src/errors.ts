@@ -132,6 +132,12 @@ export const ERRORS = {
     retryable: true,
     message: "This playbook is still being worked on. Try again when it finishes.",
   },
+  /** Apply or save on a playbook that failed or was cancelled: retrying won't help. */
+  PLAYBOOK_NOT_AVAILABLE: {
+    http: 409,
+    retryable: false,
+    message: "This playbook didn't finish, so there's nothing to apply or save. Start a new one.",
+  },
   /** Apply or save on a playbook whose comparison kept no rule (NO_CLEAR_PATTERN). */
   PLAYBOOK_HAS_NO_RULES: {
     http: 422,

@@ -41,12 +41,15 @@ export interface ApplyDeps {
 export type ApplySource =
   { type: "recipe"; recipe: ApplyRecipe } | { type: "breakdown"; breakdown: Breakdown };
 
-/** Failures that aren't the user's: the regenerate slot goes back (as v1). */
+/**
+ * Failures that aren't the user's: the regenerate slot goes back. Unlike v1's job refund,
+ * INVALID_MODEL_OUTPUT isn't here: apply is synchronous and its input is the user's goal, so a
+ * goal that always breaks the output would otherwise buy unlimited paid calls.
+ */
 const NOT_USERS_FAULT = new Set([
   "UPSTREAM_ERROR",
   "UPSTREAM_TIMEOUT",
   "CAPACITY_EXHAUSTED",
-  "INVALID_MODEL_OUTPUT",
   "INTERNAL",
 ]);
 
@@ -57,6 +60,8 @@ export async function runApply(
   source: ApplySource,
   body: ApplyRequest,
   copyCheck: { spokenLines: string[]; spokenFingerprints: readonly string[] },
+  /** Aborted when the client disconnects, so a gone caller doesn't keep paying for calls. */
+  signal?: AbortSignal,
 ): Promise<ApplyResponse> {
   const model = deps.models.pass2;
   const goal = body.goal?.trim() ?? "";
@@ -69,8 +74,13 @@ export async function runApply(
         model,
         deps.manifest.manifest_version,
         source,
+        // The copy check the output passed is part of what was cached.
+        createHash("sha256")
+          .update(JSON.stringify([copyCheck.spokenLines, copyCheck.spokenFingerprints]))
+          .digest("hex"),
         goal,
-        body.target.format,
+        // For playbooks, "match" means the channel's vertical 9:16.
+        source.type === "recipe" && body.target.format === "match" ? "9:16" : body.target.format,
         lengthSeconds,
         body.output_language,
       ]),
@@ -122,7 +132,7 @@ export async function runApply(
               model,
             },
             copyCheck,
-            undefined,
+            signal,
             { budget },
           )
         : await writeAndValidate(
@@ -137,12 +147,18 @@ export async function runApply(
               model,
             },
             copyCheck.spokenLines,
-            undefined,
+            signal,
             undefined,
             { budget },
             copyCheck.spokenFingerprints,
           );
   } catch (e) {
+    // Calls that failed still cost tokens: count them toward the daily spend.
+    const usage = e instanceof MatchCutError ? e.detail?.usage : undefined;
+    if (deps.pricing && usage && typeof usage === "object") {
+      const u = usage as { model: string; tokens: { input: number; output: number } };
+      await deps.spend?.add(costUsd(deps.pricing, u.model, u.tokens));
+    }
     if (e instanceof MatchCutError && NOT_USERS_FAULT.has(e.error.code)) await refund();
     throw e;
   }

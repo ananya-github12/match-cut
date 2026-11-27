@@ -3,6 +3,7 @@
  * the full object as one named event; pushes are chained so they stay in order, unchanged objects
  * aren't re-sent, and the stream closes when the job finishes.
  */
+import { apiError } from "@match-cut/core";
 import type { BriefEvents } from "@match-cut/infra";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -18,6 +19,8 @@ export interface SseOptions<T> {
   /** The error body sent when the object disappears. */
   notFound: () => { code: string; message: string; retryable: boolean };
   heartbeatMs?: number;
+  /** The stream closes after this long, whatever the job is doing; clients reconnect. */
+  maxMs?: number;
 }
 
 export async function streamEvents<T>(
@@ -39,10 +42,12 @@ export async function streamEvents<T>(
   let chain = Promise.resolve();
   const subscription: { off?: () => Promise<void> } = {};
   const heartbeat = setInterval(() => res.write(": ping\n\n"), o.heartbeatMs ?? 15000);
+  const lifetime = setTimeout(() => close(), o.maxMs ?? 15 * 60_000);
   const close = () => {
     if (closed) return;
     closed = true;
     clearInterval(heartbeat);
+    clearTimeout(lifetime);
     void subscription.off?.().catch(() => {});
     res.end();
   };
@@ -69,8 +74,14 @@ export async function streamEvents<T>(
       .catch(() => {});
   };
 
-  // Subscribe before the first snapshot so no change is missed in between.
-  subscription.off = await o.events.subscribe(o.id, push);
-  if (closed) await subscription.off();
+  // Subscribe before the first snapshot so no change is missed in between. The headers are
+  // already sent, so a failure here must end the stream itself, with an error event.
+  try {
+    subscription.off = await o.events.subscribe(o.id, push);
+  } catch {
+    res.write(`event: error\ndata: ${JSON.stringify(apiError("INTERNAL"))}\n\n`);
+    return close();
+  }
+  if (closed) await subscription.off().catch(() => {});
   push();
 }

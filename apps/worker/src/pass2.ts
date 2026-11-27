@@ -154,6 +154,8 @@ async function validatedPrompt(
         pass: repairPass,
         problemsBefore: check.problems,
         problemsAfter: second.problems,
+        // Both calls cost tokens: callers that track spend can count them.
+        usage: { model: first.model, tokens },
       },
     );
   }

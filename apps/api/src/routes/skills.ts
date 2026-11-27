@@ -22,7 +22,13 @@ import {
 } from "@match-cut/infra";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { runApply, type ApplyDeps } from "../apply.js";
-import { loadOwnedPlaybook, parseApplyBody, takeSlot } from "./playbooks.js";
+import {
+  abortOnDisconnect,
+  assertApplicable,
+  loadOwnedPlaybook,
+  parseApplyBody,
+  takeSlot,
+} from "./playbooks.js";
 
 export interface SkillsRouteDeps extends ApplyDeps {
   skills: SkillStore;
@@ -60,9 +66,8 @@ export async function skillsRoutes(app: FastifyInstance, deps: SkillsRouteDeps) 
       sourceRef = { type: "brief", id: brief.id };
     } else {
       const pb = await loadOwnedPlaybook(deps.playbooks, source.playbook_id, userId);
+      assertApplicable(pb);
       draft = skillFromPlaybook(pb);
-      if (draft === "NOT_READY") throw new MatchCutError("PLAYBOOK_NOT_READY");
-      if (draft === "NO_RULES") throw new MatchCutError("PLAYBOOK_HAS_NO_RULES");
       sourceRef = { type: "playbook", id: pb.id };
     }
     if (typeof draft === "string") throw new MatchCutError("INTERNAL");
@@ -129,6 +134,7 @@ export async function skillsRoutes(app: FastifyInstance, deps: SkillsRouteDeps) 
       body,
       // The source's speech isn't kept, only its fingerprints.
       { spokenLines: [], spokenFingerprints: s.spokenFingerprints },
+      abortOnDisconnect(reply),
     );
     await deps.skills.markUsed(skill.id, new Date(now()));
     return reply.status(200).send(result);

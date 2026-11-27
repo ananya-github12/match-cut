@@ -4,7 +4,12 @@
  */
 import { buildApp, type AppDeps } from "@match-cut/api/app";
 import { memoryDeps } from "@match-cut/api/testing";
-import { SKILLS_PER_USER, type PlaybookResponse, type SkillResponse } from "@match-cut/core";
+import {
+  loadPricing,
+  SKILLS_PER_USER,
+  type PlaybookResponse,
+  type SkillResponse,
+} from "@match-cut/core";
 import {
   defaultRules,
   MemoryJobQueue,
@@ -26,7 +31,14 @@ import { skillRecord } from "./playbook-fixtures.js";
 type Headers = Record<string, string>;
 const OTHER: Headers = { ...AUTH, "x-dev-user-id": "someone-else" };
 
-function setup(opts: { autoRun?: boolean; app?: Partial<AppDeps>; playbooksPerDay?: number } = {}) {
+function setup(
+  opts: {
+    autoRun?: boolean;
+    app?: Partial<AppDeps>;
+    playbooksPerDay?: number;
+    pricing?: ReturnType<typeof loadPricing>;
+  } = {},
+) {
   const kv = new MemoryKV();
   const limiter = new RateLimiter(
     kv,
@@ -49,6 +61,7 @@ function setup(opts: { autoRun?: boolean; app?: Partial<AppDeps>; playbooksPerDa
     queue: pbQueue,
     channels,
     analyzer,
+    pricing: opts.pricing,
   };
   const deps: AppDeps = { ...base, playbooks, ...opts.app };
   const pbDeps = {
@@ -440,5 +453,133 @@ describe("/v1/skills", () => {
     const full = await save({ name: "one more", source: { playbook_id: id } });
     expect([full.statusCode, full.json().error.code]).toEqual([409, "SKILL_LIMIT_REACHED"]);
     expect(full.json().error.message).toContain("50");
+  });
+});
+
+describe("review fixes (M10.7)", () => {
+  it("at the daily limit, a repeat (200) and an attach (202) still work", async () => {
+    const h = (current = setup({ playbooksPerDay: 1 }));
+    const first = await h.finished({ source: { channel: "@mockgolden01" } });
+    const repeat = await h.create({ source: { channel: "@mockgolden01" } });
+    expect([repeat.statusCode, repeat.json().id]).toEqual([200, first.id]);
+    expect((await h.create({ source: { channel: "@mockgolden02" } })).statusCode).toBe(429);
+  });
+
+  it("bad input still counts toward the limit", async () => {
+    const h = (current = setup({ playbooksPerDay: 2 }));
+    await h.create({ source: { channel: "@mockgone" } });
+    await h.create({ source: { channel: "not a channel" } });
+    expect((await h.create({ source: { channel: "@mockgolden01" } })).statusCode).toBe(429);
+  });
+
+  it("a double click starts one job", async () => {
+    const h = (current = setup({ autoRun: false }));
+    const [a, b] = await Promise.all([
+      h.create({ source: { channel: "@mockgolden05" } }),
+      h.create({ source: { channel: "@mockgolden05" } }),
+    ]);
+    expect(a.json().id).toBe(b.json().id);
+    expect(h.pbQueue.jobs).toHaveLength(1);
+  });
+
+  it("failed or cancelled playbooks answer apply and save with a non-retryable code", async () => {
+    const h = (current = setup());
+    const pb = await h.finished({ source: { channel: "@mocktiny" } });
+    for (const res of [
+      await h.inject("POST", `/v1/playbooks/${pb.id}/apply`, {}),
+      await h.inject("POST", "/v1/skills", { name: "x", source: { playbook_id: pb.id } }),
+    ]) {
+      expect([res.statusCode, res.json().error]).toEqual([
+        409,
+        expect.objectContaining({ code: "PLAYBOOK_NOT_AVAILABLE", retryable: false }),
+      ]);
+    }
+  });
+
+  it("polling apply on a running playbook doesn't use regenerate slots", async () => {
+    const h = (current = setup({ autoRun: false }));
+    const take = vi.spyOn(h.limiter, "take");
+    const { id } = (await h.create({ source: { channel: "@mockgolden01" } })).json();
+    take.mockClear();
+    for (let i = 0; i < 3; i++) {
+      expect((await h.inject("POST", `/v1/playbooks/${id}/apply`, {})).json().error.code).toBe(
+        "PLAYBOOK_NOT_READY",
+      );
+    }
+    expect(take).not.toHaveBeenCalled();
+  });
+
+  it("apply output that stays invalid keeps the slot and counts toward spend", async () => {
+    const spend = new SpendTracker(new MemoryKV(), { capUsd: 100 });
+    const h = (current = setup({ app: { spend }, pricing: loadPricing() }));
+    const pb = await h.finished();
+    const refund = vi.spyOn(h.limiter, "refund");
+    h.analyzer.applyPlaybook = async (input) => ({
+      output: {},
+      model: input.model,
+      usage: { inputTokens: 5000, outputTokens: 500 },
+    });
+    h.analyzer.repair = async (input) => ({
+      output: {},
+      model: input.model,
+      usage: { inputTokens: 5000, outputTokens: 500 },
+    });
+    const res = await h.inject("POST", `/v1/playbooks/${pb.id}/apply`, { goal: "x" });
+    expect(res.json().error.code).toBe("INVALID_MODEL_OUTPUT");
+    expect(refund).not.toHaveBeenCalledWith("regenerate", expect.anything(), expect.anything());
+    expect(await spend.today()).toBeGreaterThan(0);
+  });
+
+  it("the apply cache is keyed by language too", async () => {
+    const h = (current = setup());
+    const pb = await h.finished();
+    await h.inject("POST", `/v1/playbooks/${pb.id}/apply`, { goal: "x", output_language: "en" });
+    await h.inject("POST", `/v1/playbooks/${pb.id}/apply`, { goal: "x", output_language: "es" });
+    await h.inject("POST", `/v1/playbooks/${pb.id}/apply`, { goal: "x", output_language: "es" });
+    expect(h.analyzer.calls.filter((c) => c.method === "applyPlaybook")).toHaveLength(2);
+  });
+
+  it("other users get not-found everywhere", async () => {
+    const h = (current = setup());
+    const pb = await h.finished();
+    const skill = (
+      await h.inject("POST", "/v1/skills", { name: "Mine", source: { playbook_id: pb.id } })
+    ).json();
+    const brief = (
+      await h.inject("POST", "/v1/briefs", { source: { url: MOCK_VIDEOS.short.id } })
+    ).json();
+    await h.idle();
+    const cases: [string, string, unknown, string][] = [
+      ["GET", `/v1/playbooks/${pb.id}/events`, undefined, "PLAYBOOK_NOT_FOUND"],
+      ["POST", `/v1/playbooks/${pb.id}/apply`, {}, "PLAYBOOK_NOT_FOUND"],
+      ["GET", `/v1/skills/${skill.id}`, undefined, "SKILL_NOT_FOUND"],
+      ["POST", `/v1/skills/${skill.id}/apply`, {}, "SKILL_NOT_FOUND"],
+      ["DELETE", `/v1/skills/${skill.id}`, undefined, "SKILL_NOT_FOUND"],
+      ["POST", "/v1/skills", { name: "x", source: { brief_id: brief.id } }, "BRIEF_NOT_FOUND"],
+    ];
+    for (const [method, url, body, code] of cases) {
+      const res = await h.inject(method as "GET", url, body, OTHER);
+      expect([res.statusCode, res.json().error.code], `${method} ${url}`).toEqual([404, code]);
+    }
+    // The same idempotency key from another user is a different request.
+    const k = { "idempotency-key": "shared-key" };
+    const mine = await h.create({ source: { channel: "@mockgolden07" } }, { ...AUTH, ...k });
+    const theirs = await h.create({ source: { channel: "@mockgolden07" } }, { ...OTHER, ...k });
+    expect(theirs.json().id).not.toBe(mine.json().id);
+    expect((await h.inject("GET", "/v1/skills", undefined, OTHER)).json().skills).toEqual([]);
+  });
+
+  it("if live updates can't start, the stream ends with an error event", async () => {
+    const h = (current = setup());
+    const pb = await h.finished();
+    h.deps.events.subscribe = async () => {
+      throw new Error("redis down");
+    };
+    const base = await h.app.listen({ port: 0, host: "127.0.0.1" });
+    const text = await fetch(`${base}/v1/playbooks/${pb.id}/events`, { headers: AUTH }).then((r) =>
+      r.text(),
+    );
+    expect(text).toContain("event: error");
+    expect(text).toContain('"code":"INTERNAL"');
   });
 });

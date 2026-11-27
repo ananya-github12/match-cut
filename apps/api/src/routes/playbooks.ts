@@ -136,6 +136,27 @@ export async function loadOwnedPlaybook(
   return pb;
 }
 
+/**
+ * Apply and save need a finished playbook with rules. Running: retryable. Failed or cancelled:
+ * not, so clients that retry on `retryable` don't loop.
+ */
+export function assertApplicable(pb: PlaybookRecord): void {
+  if (pb.status === "queued" || pb.status === "processing") {
+    throw new MatchCutError("PLAYBOOK_NOT_READY");
+  }
+  if (pb.status !== "succeeded" || !pb.content) throw new MatchCutError("PLAYBOOK_NOT_AVAILABLE");
+  if (pb.content.rules.length === 0) throw new MatchCutError("PLAYBOOK_HAS_NO_RULES");
+}
+
+/** Aborts a synchronous model call when the client goes away before the answer. */
+export function abortOnDisconnect(reply: FastifyReply): AbortSignal {
+  const c = new AbortController();
+  reply.raw.on("close", () => {
+    if (!reply.raw.writableFinished) c.abort(new Error("client disconnected"));
+  });
+  return c.signal;
+}
+
 function send(reply: FastifyReply, pb: PlaybookRecord) {
   const status = isTerminal(pb.status) ? 200 : 202;
   if (status === 202) reply.header("location", `/v1/playbooks/${pb.id}`);
@@ -181,33 +202,51 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
       if (existing && existing.userId === userId) return send(reply, existing);
     }
 
-    // As v1: bad input counts toward the limit, so the slot is taken before validating.
-    const slotAt = await takeSlot(deps.limiter, "playbook", who);
-    const refund = () => deps.limiter?.refund("playbook", who, slotAt);
-    const { ref, settings, forceRefresh } = parseCreateBody(req.body);
+    // As v1, bad input counts toward the limit: a request that fails validation, or names a
+    // channel that doesn't exist, still takes a slot.
+    const countBadInput = async (e: unknown): Promise<never> => {
+      await takeSlot(deps.limiter, "playbook", who);
+      throw e;
+    };
+    let parsedBody: ReturnType<typeof parseCreateBody>;
+    try {
+      parsedBody = parseCreateBody(req.body);
+    } catch (e) {
+      return countBadInput(e);
+    }
+    const { ref, settings, forceRefresh } = parsedBody;
     // PRD: `source.mine` without a connected channel. Own-channel insights are M11.
     if (ref === "mine") throw new MatchCutError("YOUTUBE_NOT_CONNECTED");
 
     // Resolve now (cached 24 h): an unknown channel fails at once, and the repeat check needs
     // the channel ID. A YouTube outage other than quota leaves it to the worker.
     const resolved = await deps.channels.resolve(ref, { refresh: forceRefresh });
-    if (resolved.status === "not_found") throw new MatchCutError("CHANNEL_NOT_FOUND");
+    if (resolved.status === "not_found")
+      return countBadInput(new MatchCutError("CHANNEL_NOT_FOUND"));
     if (resolved.status === "unavailable" && resolved.reason === "quota") {
-      await refund();
       throw new MatchCutError("CAPACITY_EXHAUSTED", {}, { source: "youtube", reason: "quota" });
     }
     const channel = resolved.status === "found" ? resolved.channel : null;
+    const inflight = channel ? inflightKey(userId, channel.id, settings) : null;
 
+    /** Same user, channel and settings, still running: that job, if any. */
+    const runningFor = async (): Promise<PlaybookRecord | null> => {
+      const id = inflight ? await kv.get(inflight) : null;
+      const running = id ? await store.get(id) : null;
+      return running && running.userId === userId && !isTerminal(running.status) ? running : null;
+    };
+    const remember = async (id: string) => {
+      if (idemStoreKey) await kv.set(idemStoreKey, id, IDEMPOTENCY_TTL_SECONDS);
+    };
+
+    // Repeats and attaches come before the limit: they start nothing, so they never use a slot
+    // (and a user at the limit still gets them).
     if (channel && !forceRefresh) {
-      // Same user, channel and settings, still running: attach to it.
-      const runningId = await kv.get(inflightKey(userId, channel.id, settings));
-      const running = runningId ? await store.get(runningId) : null;
-      if (running && running.userId === userId && !isTerminal(running.status)) {
-        await refund();
-        if (idemStoreKey) await kv.set(idemStoreKey, running.id, IDEMPOTENCY_TTL_SECONDS);
+      const running = await runningFor();
+      if (running) {
+        await remember(running.id);
         return send(reply, running);
       }
-      // Finished in the last 24 hours: return it (200), no new job, no slot used.
       const recent = await store.findRecent({
         userId,
         channelId: channel.id,
@@ -215,18 +254,19 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
         since: new Date(now() - REPEAT_WINDOW_MS),
       });
       if (recent && !isDegraded(recent)) {
-        await refund();
-        if (idemStoreKey) await kv.set(idemStoreKey, recent.id, IDEMPOTENCY_TTL_SECONDS);
+        await remember(recent.id);
         return reply.status(200).send(toPlaybookResponse(recent));
       }
     }
+
+    const slotAt = await takeSlot(deps.limiter, "playbook", who);
+    const refund = () => deps.limiter?.refund("playbook", who, slotAt);
 
     if (deps.spend && (await deps.spend.overCap())) {
       await refund();
       throw new MatchCutError("CAPACITY_EXHAUSTED", {}, { reason: "spend_cap" });
     }
 
-    const at = new Date(now());
     const record: PlaybookRecord = {
       id: newPlaybookId(),
       userId,
@@ -248,8 +288,9 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
       warnings: [],
       error: null,
       meta: { models: {}, versions: {}, cached: false, timingsMs: {}, tokens: {} },
-      createdAt: at,
-      updatedAt: at,
+      // The slot's time: the worker's refund finds the same rate-limit window.
+      createdAt: slotAt,
+      updatedAt: slotAt,
     };
 
     if (idemStoreKey) {
@@ -261,20 +302,36 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
           await refund();
           return send(reply, other);
         }
+        // The key pointed at a playbook that's gone: it now means this one.
+        await kv.set(idemStoreKey, record.id, IDEMPOTENCY_TTL_SECONDS);
       }
+    }
+
+    // Claim the in-flight slot atomically, so a double click starts one job, not two.
+    if (inflight && !forceRefresh) {
+      const claimed = await kv.setIfAbsent(inflight, record.id, INFLIGHT_TTL_SECONDS);
+      if (!claimed) {
+        const running = await runningFor();
+        if (running) {
+          await refund();
+          await remember(running.id);
+          return send(reply, running);
+        }
+        await kv.set(inflight, record.id, INFLIGHT_TTL_SECONDS);
+      }
+    } else if (inflight) {
+      await kv.set(inflight, record.id, INFLIGHT_TTL_SECONDS);
     }
 
     let created = false;
     try {
       await store.create(record);
       created = true;
-      if (channel) {
-        await kv.set(inflightKey(userId, channel.id, settings), record.id, INFLIGHT_TTL_SECONDS);
-      }
       await deps.queue.enqueue({ playbookId: record.id });
     } catch (e) {
       req.log.error({ err: (e as Error).message, playbookId: record.id }, "job store unavailable");
       if (created) await store.delete(record.id).catch(() => {});
+      if (inflight) await kv.del(inflight);
       await refund();
       throw new MatchCutError("INTERNAL", {}, { reason: "job_store_down" });
     }
@@ -325,10 +382,11 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
 
   app.post<{ Params: { id: string } }>("/v1/playbooks/:id/apply", auth, async (req, reply) => {
     const pb = await loadOwnedPlaybook(store, req.params.id, req.auth.userId);
+    // Readiness first: a client polling a running playbook doesn't burn its slots.
+    assertApplicable(pb);
     const slotAt = await takeSlot(deps.limiter, "regenerate", req.auth);
     const body = parseApplyBody(req.body);
-    if (pb.status !== "succeeded" || !pb.content) throw new MatchCutError("PLAYBOOK_NOT_READY");
-    if (pb.content.rules.length === 0) throw new MatchCutError("PLAYBOOK_HAS_NO_RULES");
+    const content = pb.content!;
     const result = await runApply(
       deps,
       req.auth,
@@ -336,18 +394,19 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
       {
         type: "recipe",
         recipe: {
-          rules: pb.content.rules.map((r) => ({
+          rules: content.rules.map((r) => ({
             feature: r.feature,
             value: r.value,
             title: r.title,
             how_to: r.how_to,
           })),
-          houseStyle: pb.content.house_style,
-          template: pb.content.recipe_prompt_template,
+          houseStyle: content.house_style,
+          template: content.recipe_prompt_template,
         },
       },
       body,
       { spokenLines: pb.spokenLines ?? [], spokenFingerprints: [] },
+      abortOnDisconnect(reply),
     );
     return reply.status(200).send(result);
   });
