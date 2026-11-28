@@ -4,8 +4,9 @@
  * list"). Each case builds a playbook end to end with the real pipeline, then checks it in code:
  *
  * - outcome: the expected status or error code (and NOT_ENOUGH_DATA reasons);
- * - faithful: evidence and confidence equal the comparison, examples are real moments of
- *   breakouts carrying the value, counterexamples really break the rule;
+ * - faithful: evidence recounted here from the stored feature rows; then the pipeline's own
+ *   faithfulness check re-run on the stored record (confidence equals the comparison, examples
+ *   are real moments of breakouts carrying the value, counterexamples really break the rule);
  * - planted: every planted edit pattern reaches a rule (mock channels), and no other rule is high;
  * - warnings: the expected caveats are present;
  * - recipe: a recipe prompt template exists when there are rules;
@@ -15,10 +16,15 @@
  * of "not explained", originality of the recipe. Real channels need a human-written note first.
  */
 import {
+  costUsd,
   faithfulnessProblems,
+  MatchCutError,
+  parseChannelSource,
   SHOT_LIST_MAX,
   SHOT_LIST_MIN,
+  UNKNOWN,
   type Breakdown,
+  type ChannelRef,
   type CapabilityManifest,
   type FeatureName,
   type ModelNames,
@@ -40,24 +46,36 @@ import { z } from "zod";
 
 const feature = z.tuple([z.string(), z.string()]);
 
-export const playbookCaseSchema = z.object({
-  id: z.string().regex(/^[a-z0-9-]+$/),
-  source: z.union([
-    z.object({ type: z.literal("mock"), handle: z.string() }),
-    z.object({ type: z.literal("channel"), channel: z.string().nullable() }),
-  ]),
-  category: z.string(),
-  expect: z.object({
-    outcome: z.string(),
-    planted: z.array(feature).optional(),
-    warnings: z.array(z.string()).optional(),
-    reasons: z.array(z.string()).optional(),
-  }),
-  /** PRD: each golden channel has a human-written note on why its outliers worked. */
-  note: z.string(),
-  note_by: z.string(),
-  status: z.enum(["ready", "needs_channel", "needs_note"]),
-});
+export const playbookCaseSchema = z
+  .object({
+    id: z.string().regex(/^[a-z0-9-]+$/),
+    source: z.union([
+      z.object({ type: z.literal("mock"), handle: z.string() }),
+      z.object({ type: z.literal("channel"), channel: z.string().nullable() }),
+    ]),
+    category: z.string(),
+    expect: z.object({
+      outcome: z.string(),
+      planted: z.array(feature).optional(),
+      warnings: z.array(z.string()).optional(),
+      reasons: z.array(z.string()).optional(),
+    }),
+    /** PRD: each golden channel has a human-written note on why its outliers worked. */
+    note: z.string(),
+    note_by: z.string(),
+    status: z.enum(["ready", "needs_channel", "needs_note"]),
+  })
+  // A golden channel exists to check rule correctness: it must expect rules to find.
+  .refine(
+    (c) =>
+      !c.id.startsWith("golden-") ||
+      (c.expect.outcome === "succeeded" && (c.expect.planted?.length ?? 0) > 0),
+    { message: "golden cases expect succeeded with planted patterns" },
+  )
+  // Warnings only exist on a finished playbook.
+  .refine((c) => !c.expect.warnings || c.expect.outcome === "succeeded", {
+    message: "expect.warnings needs outcome succeeded",
+  });
 export type PlaybookCase = z.infer<typeof playbookCaseSchema>;
 
 export const playbookSetSchema = z.object({
@@ -80,6 +98,14 @@ export interface LoadedPlaybookCase {
   skip?: string;
 }
 
+/** The channel a case builds from: a mock handle, or a real channel parsed like the API does. */
+export function caseChannel(c: PlaybookCase): ChannelRef | null {
+  if (c.source.type === "mock") return { kind: "handle", handle: c.source.handle };
+  if (!c.source.channel) return null;
+  const parsed = parseChannelSource(c.source.channel);
+  return parsed.ok ? parsed.ref : null;
+}
+
 export function loadPlaybookSet(
   dir: string,
   provider: "mock" | "gemini",
@@ -92,6 +118,7 @@ export function loadPlaybookSet(
     if (c.status === "needs_note" || !c.note.trim() || !c.note_by.trim()) {
       return { case: c, skip: "needs a human-written note" };
     }
+    if (!caseChannel(c)) return { case: c, skip: "not a channel handle, ID or link" };
     // Mock channels exist only offline; real ones only with the real YouTube API.
     if (provider === "mock" && c.source.type === "channel") {
       return { case: c, skip: "real channel: run with --provider gemini" };
@@ -154,7 +181,7 @@ export interface PlaybookRunDeps {
 const evidence = (r: NonNullable<PlaybookRecord["content"]>["rules"][number]) =>
   `${r.evidence.outliers_with} of ${r.evidence.outliers_known} breakouts · ${r.evidence.typical_with} of ${r.evidence.typical_known} typical`;
 
-/** The facts a stored playbook was written from, rebuilt for the independent faithfulness check. */
+/** The facts a stored playbook was written from, rebuilt for the faithfulness check. */
 function factsOf(pb: PlaybookRecord): PlaybookFacts {
   const c = pb.comparison!;
   const duration = new Map(pb.videos.map((v) => [v.id, v.durationSeconds]));
@@ -174,13 +201,56 @@ function factsOf(pb: PlaybookRecord): PlaybookFacts {
   };
 }
 
-export async function runPlaybookCase(
-  loaded: LoadedPlaybookCase,
-  set: Pick<PlaybookSet, "apply">,
-  deps: PlaybookRunDeps,
-): Promise<PlaybookCaseResult> {
-  const c = loaded.case;
-  const base: PlaybookCaseResult = {
+/**
+ * Evidence recounted here, without the comparison code: from the stored feature rows of the
+ * videos the playbook says it compared. Catches a comparison that miscounts, or rows that don't
+ * belong to the compared videos.
+ */
+export function recountProblems(pb: PlaybookRecord): string[] {
+  const rows = pb.comparison?.features ?? [];
+  const p: string[] = [];
+  const compared = new Map(
+    pb.videos.filter((v) => v.compared && v.group !== "other").map((v) => [v.id, v.group]),
+  );
+  const seen = new Set(rows.map((r) => r.videoId));
+  if (seen.size !== rows.length) p.push("a video has more than one feature row");
+  for (const r of rows) {
+    if (compared.get(r.videoId) !== r.group) {
+      p.push(`feature row ${r.videoId} isn't a compared ${r.group}`);
+    }
+  }
+  for (const id of compared.keys()) {
+    if (!seen.has(id)) p.push(`compared video ${id} has no feature row`);
+  }
+  const known = (v: string | undefined) => v !== undefined && v !== "" && v !== UNKNOWN;
+  (pb.content?.rules ?? []).forEach((rule, i) => {
+    const value = (g: "outlier" | "typical") =>
+      rows.filter((r) => r.group === g).map((r) => r.features[rule.feature as FeatureName]);
+    const outliers = value("outlier");
+    const typical = value("typical");
+    const want = {
+      outliers_with: outliers.filter((v) => v === rule.value).length,
+      outliers_known: outliers.filter(known).length,
+      typical_with: typical.filter((v) => v === rule.value).length,
+      typical_known: typical.filter(known).length,
+    };
+    const got = rule.evidence;
+    if (
+      got.outliers_with !== want.outliers_with ||
+      got.outliers_known !== want.outliers_known ||
+      got.typical_with !== want.typical_with ||
+      got.typical_known !== want.typical_known
+    ) {
+      p.push(
+        `rules[${i}] evidence ${got.outliers_with}/${got.outliers_known} · ${got.typical_with}/${got.typical_known}, recounted ${want.outliers_with}/${want.outliers_known} · ${want.typical_with}/${want.typical_known}`,
+      );
+    }
+  });
+  return p;
+}
+
+function emptyResult(c: PlaybookCase): PlaybookCaseResult {
+  return {
     id: c.id,
     category: c.category,
     status: null,
@@ -205,8 +275,15 @@ export async function runPlaybookCase(
     costUsd: 0,
     ms: 0,
   };
-  if (loaded.skip) return { ...base, skipped: loaded.skip };
+}
 
+/** Builds a case's playbook end to end with the real pipeline, in a fresh store and cache. */
+export async function buildPlaybook(
+  c: PlaybookCase,
+  deps: PlaybookRunDeps,
+): Promise<PlaybookRecord> {
+  const source = caseChannel(c);
+  if (!source) throw new Error(`${c.id}: not a channel handle, ID or link`);
   // A fresh store and cache per case: nothing carries over from one channel to the next.
   const store = new MemoryPlaybookStore();
   const at = new Date(deps.now());
@@ -217,10 +294,7 @@ export async function runPlaybookCase(
     status: "queued",
     stage: null,
     progress: null,
-    source:
-      c.source.type === "mock"
-        ? { kind: "handle", handle: c.source.handle }
-        : { kind: "handle", handle: c.source.channel!.replace(/^@/, "") },
+    source,
     settings: { windowDays: 90, maxVideos: 50, outlierThreshold: 2 },
     forceRefresh: true,
     channel: null,
@@ -238,7 +312,6 @@ export async function runPlaybookCase(
     updatedAt: at,
   };
   await store.create(record);
-  const started = Date.now();
   await runPlaybookJob(
     { playbookId: record.id },
     {
@@ -253,14 +326,47 @@ export async function runPlaybookCase(
       now: deps.now,
     },
   );
-  const pb = (await store.get(record.id))!;
+  return (await store.get(record.id))!;
+}
+
+export async function runPlaybookCase(
+  loaded: LoadedPlaybookCase,
+  set: Pick<PlaybookSet, "apply">,
+  deps: PlaybookRunDeps,
+): Promise<PlaybookCaseResult> {
+  const c = loaded.case;
+  if (loaded.skip) return { ...emptyResult(c), skipped: loaded.skip };
+  const started = Date.now();
+  let pb: PlaybookRecord;
+  try {
+    pb = await buildPlaybook(c, deps);
+  } catch (e) {
+    // One crashing case fails on its own; the rest of the set still runs and is reported.
+    const r = emptyResult(c);
+    r.status = "crashed";
+    r.checks.outcome = false;
+    r.problems.push(`outcome: crashed: ${e instanceof Error ? e.message : String(e)}`);
+    r.ms = Date.now() - started;
+    return r;
+  }
+  const r = await checkPlaybook(c, pb, set, deps);
+  r.ms = Date.now() - started;
+  return r;
+}
+
+/** Every code check on a built playbook, then apply. Exported so tests can tamper with `pb`. */
+export async function checkPlaybook(
+  c: PlaybookCase,
+  pb: PlaybookRecord,
+  set: Pick<PlaybookSet, "apply">,
+  deps: PlaybookRunDeps,
+): Promise<PlaybookCaseResult> {
   const r: PlaybookCaseResult = {
-    ...base,
+    ...emptyResult(c),
     status: pb.status,
     errorCode: pb.error?.code ?? null,
     warnings: pb.warnings.map((w) => w.code),
     costUsd: pb.meta.costUsd ?? 0,
-    ms: Date.now() - started,
   };
   const problem = (check: PlaybookCheck, text: string) => r.problems.push(`${check}: ${text}`);
 
@@ -276,7 +382,19 @@ export async function runPlaybookCase(
       problem("outcome", `missing reasons ${missing.join(", ")}`);
     }
   }
-  if (pb.status !== "succeeded" || !pb.content || !pb.comparison) return r;
+  if (c.expect.warnings) {
+    const missing = c.expect.warnings.filter((w) => !r.warnings.includes(w));
+    r.checks.warnings = missing.length === 0;
+    if (missing.length) problem("warnings", `missing ${missing.join(", ")}`);
+  }
+  if (pb.status !== "succeeded" || !pb.content || !pb.comparison) {
+    // A case expecting rules fails here rather than skipping the rule checks.
+    if (c.expect.planted) {
+      r.checks.planted = false;
+      problem("planted", "no playbook to check");
+    }
+    return r;
+  }
 
   const content = pb.content;
   r.rules = content.rules.map((x) => ({
@@ -290,9 +408,11 @@ export async function runPlaybookCase(
   r.notExplained = content.not_explained;
   r.recipe = content.recipe_prompt_template;
 
-  // Faithfulness, checked again from the stored record, independently of the pipeline's check.
-  const facts = factsOf(pb);
-  const unfaithful = faithfulnessProblems({ ...content, warnings: [] }, facts);
+  // Faithfulness: evidence recounted here, then the pipeline's own check re-run on the record.
+  const unfaithful = [
+    ...recountProblems(pb),
+    ...faithfulnessProblems({ ...content, warnings: [] }, factsOf(pb)),
+  ];
   r.checks.faithful = unfaithful.length === 0;
   for (const u of unfaithful) problem("faithful", u);
 
@@ -310,17 +430,12 @@ export async function runPlaybookCase(
       problem("planted", `high-confidence rules not planted: ${intruders.join(", ")}`);
   }
 
-  if (c.expect.warnings) {
-    const missing = c.expect.warnings.filter((w) => !r.warnings.includes(w));
-    r.checks.warnings = missing.length === 0;
-    if (missing.length) problem("warnings", `missing ${missing.join(", ")}`);
-  }
-
   if (content.rules.length === 0) return r;
   r.checks.recipe = content.recipe_prompt_template !== null;
   if (!r.checks.recipe) problem("recipe", "no recipe prompt template");
 
   // Apply: a prompt that passes v1's checks (applyAndValidate throws otherwise) and a shot list.
+  // Same copy-check inputs as the API's playbook apply.
   try {
     const run = await applyAndValidate(
       deps.analyzer,
@@ -344,6 +459,7 @@ export async function runPlaybookCase(
       },
       { spokenLines: pb.spokenLines ?? [], spokenFingerprints: [] },
     );
+    if (deps.pricing) r.costUsd += costUsd(deps.pricing, run.model, run.tokens);
     r.applyPrompt = run.output.cardboard_prompt;
     r.shots = run.output.shot_list.length;
     const shotsOk = !run.shotListDropped && r.shots >= SHOT_LIST_MIN && r.shots <= SHOT_LIST_MAX;
@@ -351,6 +467,12 @@ export async function runPlaybookCase(
     if (!shotsOk)
       problem("apply", `shot list ${run.shotListDropped ? "dropped" : `has ${r.shots} shots`}`);
   } catch (e) {
+    // Failed calls still cost tokens.
+    const usage = e instanceof MatchCutError ? e.detail?.usage : undefined;
+    if (deps.pricing && usage && typeof usage === "object") {
+      const u = usage as { model: string; tokens: { input: number; output: number } };
+      r.costUsd += costUsd(deps.pricing, u.model, u.tokens);
+    }
     r.checks.apply = false;
     problem("apply", e instanceof Error ? e.message : String(e));
   }

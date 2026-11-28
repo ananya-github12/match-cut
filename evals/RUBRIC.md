@@ -30,14 +30,14 @@ Source: PRD-playbooks.md, "Quality evaluation". `pnpm eval -- --set playbooks` b
 each case in `evals/playbooks/cases.json` with the real pipeline and checks it in code
 (`src/playbooks.ts`):
 
-| Check    | Passes when                                                                                                                         |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| outcome  | The playbook succeeds, or fails with the expected code (and, for `NOT_ENOUGH_DATA`, the expected reasons)                           |
-| faithful | Evidence and confidence equal the comparison; examples are real moments of breakouts with the value; counterexamples break the rule |
-| planted  | Every planted pattern (mock channels) is a rule, and no other rule is high confidence                                               |
-| warnings | The expected caveats are present                                                                                                    |
-| recipe   | A playbook with rules has a recipe prompt template                                                                                  |
-| apply    | Apply returns a prompt that passes v1's prompt checks and a shot list of 4 to 15 shots                                              |
+| Check    | Passes when                                                                                                                                                                                     |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| outcome  | The playbook succeeds, or fails with the expected code (and, for `NOT_ENOUGH_DATA`, the expected reasons)                                                                                       |
+| faithful | Evidence recounted from the stored feature rows of the compared videos; confidence equals the comparison; examples are real moments of breakouts with the value; counterexamples break the rule |
+| planted  | Every planted pattern (mock channels) is a rule, and no other rule is high confidence                                                                                                           |
+| warnings | The expected caveats are present                                                                                                                                                                |
+| recipe   | A playbook with rules has a recipe prompt template                                                                                                                                              |
+| apply    | Apply returns a prompt that passes v1's prompt checks and a shot list of 4 to 15 shots                                                                                                          |
 
 People score what code can't, 1 to 5 each, on the `--review` sheet against the case's note:
 

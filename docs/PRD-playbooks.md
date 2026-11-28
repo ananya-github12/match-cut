@@ -602,9 +602,9 @@ Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook,
 
 Evaluation notes (M10.10, for sign-off):
 
-- `pnpm eval -- --set playbooks` runs `evals/playbooks/cases.json` with the real pipeline. Code checks each case: outcome, faithfulness (re-run from the stored record), planted patterns, warnings, recipe, and apply (v1's prompt checks plus a 4 to 15 shot list). People score the four rubric criteria on the `--review` sheet (`evals/RUBRIC.md`, Playbooks).
+- `pnpm eval -- --set playbooks` runs `evals/playbooks/cases.json` with the real pipeline. Code checks each case: outcome, faithfulness (evidence recounted from the stored feature rows, then the pipeline's own check re-run on the stored record), planted patterns, warnings, recipe, and apply (v1's prompt checks plus a 4 to 15 shot list). People score the four rubric criteria on the `--review` sheet (`evals/RUBRIC.md`, Playbooks).
 - The 10 golden channels are mock channels with a planted edit pattern, so "rule correctness" is checked by code offline: every planted pattern must become a rule and no other rule may be high confidence. Their notes describe the fixture design, not a person's judgment of a real channel, and are labeled `fixture design (mock channel)`.
-- Real channels are placeholders (`needs_channel`) until someone picks a channel and writes the note on why its outliers worked. They run only with `--provider gemini --yes`, which calls the paid APIs. The set holds 18 cases toward the target of 30.
+- Real channels are placeholders (`needs_channel`) until someone picks a channel and writes the note on why its outliers worked. They run only with `--provider gemini --yes`, which calls the paid APIs (about 22 Gemini calls per channel). Real channels can be a handle, channel ID or channel link, read the same way as the API. The set grows toward `target_size` (30).
 - Mock runs report no model cost. Pricing mock token counts would read as real spend.
 
 ## Risks

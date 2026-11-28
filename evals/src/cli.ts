@@ -194,15 +194,23 @@ async function runPlaybooks() {
   const pricing = loadPricing();
   const set = loadPlaybookSet(`${ROOT}playbooks`, provider);
   const only = opt("only");
-  if (only) set.loaded = set.loaded.filter((c) => c.case.id === only);
+  if (only) {
+    set.loaded = set.loaded.filter((c) => c.case.id === only);
+    if (set.loaded.length === 0) {
+      console.error(`No playbook case "${only}" in evals/playbooks/cases.json.`);
+      process.exit(2);
+    }
+  }
   const runnable = set.loaded.filter((c) => !c.skip);
   if (provider === "gemini") {
     if (!env.GEMINI_API_KEY || !env.YOUTUBE_DATA_API_KEY) {
       console.error("Set GEMINI_API_KEY and YOUTUBE_DATA_API_KEY in .env first.");
       process.exit(2);
     }
+    // Per channel: up to 10 Shorts watched (pass 1) and read for features, then writing and
+    // apply; a failed check adds one repair call. Plus a few YouTube Data API reads.
     console.log(
-      `${runnable.length} real channels; each watches up to 10 Shorts with the paid Gemini API.`,
+      `${runnable.length} real channels; each makes about 22 paid Gemini calls (10 Shorts watched), more if repairs are needed.`,
     );
     if (!flag("yes")) {
       console.error("This calls the paid Gemini API. Re-run with --yes to proceed.");
@@ -263,6 +271,9 @@ async function runPlaybooks() {
   if (flag("review")) writeFileSync(`${outDir}/review.md`, playbookReviewSheet(results));
   console.log(report.split("## Cases")[0]);
   console.log(`Report: ${outDir}/report.md`);
-  // --gate: every case that ran must pass.
-  if (flag("gate") && summary.passed < summary.ran) process.exitCode = 1;
+  // --gate: at least one case ran, and every case that ran passed.
+  if (flag("gate") && (summary.ran === 0 || summary.passed < summary.ran)) {
+    if (summary.ran === 0) console.error("Gate failed: no case ran.");
+    process.exitCode = 1;
+  }
 }
