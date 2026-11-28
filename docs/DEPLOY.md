@@ -20,7 +20,9 @@ visitor an anonymous ID, so Gemini and YouTube keys live only on the API and wor
 - Decide the mode:
   - **Demo, no model cost:** `PROVIDER=mock`. Everything works with recorded fixtures.
   - **Real analysis:** `PROVIDER=gemini` with a **paid** Gemini key (the free tier can't use the
-    Pro-tier model and caps YouTube input at 8 hours a day) and a YouTube Data API key.
+    Pro-tier model and caps YouTube input at 8 hours a day) and a YouTube Data API key. Playbooks
+    need both: each one reads the channel with the YouTube Data API (a few quota units) and makes
+    about 22 Gemini calls (up to 10 Shorts watched, then writing). The daily spend cap covers them.
 - Generate two secrets and keep them in a password manager:
 
   ```bash
@@ -59,14 +61,19 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml rm -sf api worke
    | `GEMINI_API_KEY`, `YOUTUBE_DATA_API_KEY` | only for `gemini` |
    | `GEMINI_MODEL_STANDARD`, `GEMINI_MODEL_DEEP`, `GEMINI_MODEL_FALLBACK` | see `.env.example` |
    | `DAILY_SPEND_CAP_USD` | start low, e.g. `2` |
+   | `RATE_PLAYBOOKS_PER_DAY` | playbooks per visitor per day (default `5`) |
    | `RATE_ORG_PER_DAY` | for a public demo, e.g. `200` (all visitors share one org) |
    | `WEB_ORIGIN` | your Vercel URL |
    | `MCP_API_KEYS` | optional: keys for the MCP server at `/mcp` (`openssl rand -hex 24`); empty turns it off |
 
    Give it a public domain and set the health check path to `/v1/health`. The API runs database
-   migrations on start. The host's `PORT` is used automatically.
+   migrations on start (including the `playbooks` and `skills` tables). The host's `PORT` is used
+   automatically.
 4. Add a second service from the same repo for the **worker**: same variables, but `APP=worker`,
-   and no public domain.
+   and no public domain. It runs briefs and playbooks from separate queues. Playbook settings, with
+   defaults that suit one small worker: `PLAYBOOK_WORKER_CONCURRENCY` (`2` playbooks at once),
+   `PLAYBOOK_WATCH_CONCURRENCY` (`3` videos at once, the PRD's maximum),
+   `PLAYBOOK_TIMEOUT_SECONDS` (`600`) and `PLAYBOOK_RETENTION_DAYS` (`30`).
 5. Check: `https://<api-domain>/v1/health` shows `database`, `cache` and `gemini` (or `mock`) as ok.
 
 **Fly.io instead:** deploy the same image twice (`APP=api` with an HTTP service on the internal
@@ -87,7 +94,8 @@ and use a Redis provider that supports `noeviction` (for example Upstash with ev
 3. Deploy, then set the API's `WEB_ORIGIN` to the Vercel URL.
 4. Event streams run in the proxy function for up to 300 seconds (`maxDuration`); your Vercel plan
    may cap this lower. When a stream ends early, the app falls back to polling, so results still
-   arrive.
+   arrive. A playbook can take longer than one stream (up to 10 minutes); its page polls after the
+   stream ends.
 
 ## Alternative: everything on Vercel (services)
 
@@ -112,7 +120,8 @@ this file and works as in step 3.
 
 ## 4. After deploying
 
-- Open the site, paste a link, and run one brief end to end.
+- Open the site, paste a link, and run one brief end to end. Then open **Playbooks**, build one for
+  a channel, apply it, and save it as a skill.
 - Watch the worker logs for `"level":"alert"` lines; run the ops report from a machine that can
   reach the database: `DATABASE_URL=... REDIS_URL=... pnpm ops:report`.
 - In Google Cloud, restrict the YouTube Data API key to that API, and set a budget alert on the

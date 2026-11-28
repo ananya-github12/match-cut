@@ -1,6 +1,8 @@
 # Match Cut
 
-Turns a public YouTube reference video into an edit prompt for Cardboard's AI Director. Spec: [docs/PRD.md](docs/PRD.md). Working brief for Claude Code: [CLAUDE.md](CLAUDE.md).
+Turns a public YouTube reference video into an edit prompt for Cardboard's AI Director. It also builds **playbooks**: give it a channel, and it finds which of the channel's Shorts broke out, watches them and typical ones, and turns the edit choices that set the breakouts apart into rules you can apply to your own video or save as a skill.
+
+Specs: [docs/PRD.md](docs/PRD.md) (v1, briefs) and [docs/PRD-playbooks.md](docs/PRD-playbooks.md) (MCP tool, shot lists, playbooks and skills). Working brief for Claude Code: [CLAUDE.md](CLAUDE.md).
 
 ## Prerequisites
 
@@ -31,7 +33,12 @@ Open http://localhost:3000. `corepack pnpm check:setup --ping <link>` checks the
 
 ## Use Match Cut from Claude or ChatGPT (MCP)
 
-The API serves a remote MCP server at `/mcp` with four tools: `analyze_reference`, `get_brief`, `regenerate_prompt` and `shot_list` (what to film). With Cardboard's connector in the same chat, the assistant can turn a YouTube link into an edit of your own footage.
+The API serves a remote MCP server at `/mcp` with these tools:
+
+- briefs: `analyze_reference`, `get_brief`, `regenerate_prompt` and `shot_list` (what to film);
+- playbooks and skills: `build_playbook`, `get_playbook`, `apply_playbook`, `save_skill` and `list_skills`.
+
+With Cardboard's connector in the same chat, the assistant can turn a YouTube link, or a channel's playbook, into an edit of your own footage.
 
 1. Generate a key and add it to the API's `MCP_API_KEYS` (comma-separated; each key is its own user):
 
@@ -43,6 +50,26 @@ The API serves a remote MCP server at `/mcp` with four tools: `analyze_reference
 3. Also connect Cardboard (Claude's connector directory), then ask: "Make my clips look like this Short: <link>".
 
 Locally: `curl -s localhost:4000/mcp` answers 405 (POST only); `tests/mcp.test.ts` drives every tool with the official MCP client.
+
+## Playbooks and saved skills
+
+In the web app, open **Playbooks** (`/playbooks`), paste a channel (`@handle`, channel link or one of its video links) and build. The page streams progress (channel, stats, scoring, watching N of M, comparing, writing), then shows:
+
+- a scatter of the channel's Shorts by outlier score;
+- rules with evidence ("4 of 5 breakouts · 1 of 5 typical") and confidence;
+- the channel's house style, and what the edit doesn't explain;
+- example clips that open at the moment;
+- an apply panel that writes a Cardboard prompt and shot list for your goal.
+
+**Save as skill** keeps the rules; **Skills** (`/skills`) lists them and applies them without watching anything again.
+
+Evidence, confidence and examples come from code; the model writes only the words, and every playbook passes a faithfulness check before it's shown.
+
+- Mock channels: `@mockgolden01` to `@mockgolden10` (each with a planted edit pattern), `@mocktiny` (too little data), `@mockflat` (no breakouts), `@mockmixed`, `@mockhidden`, `@mocknew` (warnings), `@mockgone` (not found), `@mockdown` (YouTube unavailable). Specs: `packages/providers/src/youtube/mock-channels.ts`.
+- Real channels need `PROVIDER=gemini` and both keys. A playbook watches up to 10 Shorts: about 22 Gemini calls, cached for 24 hours across users. Each user can build 5 playbooks a day (`RATE_PLAYBOOKS_PER_DAY`).
+- Endpoints:
+  - `POST /v1/playbooks`, then `GET /v1/playbooks/{id}` and `/events`; `POST /v1/playbooks/{id}/apply`; `DELETE /v1/playbooks/{id}`.
+  - `POST /v1/skills`, `GET /v1/skills`, `GET /v1/skills/{id}`, `POST /v1/skills/{id}/apply`, `DELETE /v1/skills/{id}`.
 
 ## Checks
 
@@ -64,17 +91,31 @@ curl -s -H "Authorization: Bearer dev-token-change-me" -H "content-type: applica
 curl -sN -H "Authorization: Bearer dev-token-change-me" localhost:4000/v1/briefs/<id>/events
 ```
 
+A playbook (mock channel), then apply it:
+
+```sh
+curl -s -H "Authorization: Bearer dev-token-change-me" -H "content-type: application/json" \
+  -d '{"source":{"channel":"@mockgolden01"}}' localhost:4000/v1/playbooks
+curl -s -H "Authorization: Bearer dev-token-change-me" -H "content-type: application/json" \
+  -d '{"goal":"a 30-second video about my coffee cart","target":{"format":"9:16","length_seconds":30}}' \
+  localhost:4000/v1/playbooks/<id>/apply
+```
+
 Mock video IDs for every precheck case live in `packages/providers/src/youtube/mock.ts`; failure triggers (`mockFailP1a`, a goal containing `mockFailP2a`, `mockSlow001`) in `packages/providers/src/analyzer/mock.ts`.
 
 ## Layout
 
-| Path                                 | What                                                                                         |
-| ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `packages/core`                      | Zod schemas, env loading, shared constants (URL parser, prompts and errors land in M1 to M4) |
-| `apps/api`                           | Fastify API                                                                                  |
-| `apps/worker`                        | BullMQ worker running the analysis pipeline                                                  |
-| `apps/web`                           | Next.js frontend                                                                             |
-| `config/capability-manifest.v0.json` | Placeholder list of Cardboard operations                                                     |
+| Path                                 | What                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`                      | Zod schemas, env, errors, URL and channel parsers, versioned prompts and schemas, playbook scoring, comparison and checks |
+| `packages/providers`                 | Gemini and mock analyzers, YouTube video and channel lookups (real and mock)                                              |
+| `packages/infra`                     | Postgres (Drizzle) and in-memory stores, Redis cache, queues, limits, serializers                                         |
+| `apps/api`                           | Fastify API, SSE, rate limits, MCP server at `/mcp`                                                                       |
+| `apps/worker`                        | BullMQ worker: brief pipeline and playbook pipeline                                                                       |
+| `apps/web`                           | Next.js frontend: editor with AI Chat, playbook page, skills list                                                         |
+| `evals`                              | Golden sets for briefs and playbooks, rubric, reports                                                                     |
+| `tests`                              | Lifecycle, API, pipeline and MCP tests; integration tests against real Postgres and Redis                                 |
+| `config/capability-manifest.v0.json` | Placeholder list of Cardboard operations                                                                                  |
 
 ## Evals (golden set)
 

@@ -620,6 +620,19 @@ Evaluation notes (M10.10, for sign-off):
 | Assistants misuse the MCP tool, for example running edits without confirming | Medium | Medium | Tool descriptions require confirmation; MCP evals |
 | Gemini overload during a 10-video playbook | Medium | Medium | Existing retry, fallback and overload rounds; playbook resumes from finished videos |
 
+## Sign-off checklist (M10)
+
+M10 was built in mock mode, with decisions the PRD left open recorded next to the section they belong to. Each needs the owner's sign-off; nothing below has been run against real channels yet.
+
+- [ ] **Changes to v1 decisions** (top of this document): the two non-goals and the two extra text steps.
+- [ ] **Writing** (Feature 3, "Implementation notes (M10.4)"): code-owned evidence and counterexamples, fallback wording, zero-rule playbooks, recipe length 150 to 300 words, English only.
+- [ ] **Fallback rule wording** and **code-written lines** (Feature 3): drafted copy.
+- [ ] **Storage and pipeline** (Feature 3, M10.5 and M10.6 notes): what's stored, 30-day retention, caches, per-video skips, writer outage still succeeding with `RECIPE_UNAVAILABLE`, refunds.
+- [ ] **Skills** (Feature 4, M10.5 notes and the drafted skill object): snapshot contents, evidence counts kept, speech fingerprints, encrypted names, 50 per user.
+- [ ] **API** (API additions): error codes added in M10.7 and their copy, behavior notes, and the playbook warning copy.
+- [ ] **Frontend** (Frontend additions, M10.9 notes): every string in `apps/web/lib/playbook-strings.ts`.
+- [ ] **Evaluation** (Quality evaluation, M10.10 notes): mock golden channels with planted patterns stand in for real ones until real channels are picked and their notes written.
+
 ## Open questions
 
 - [ ] Sign-off on the two changed v1 non-goals.
@@ -643,3 +656,5 @@ Each follows v1's working rules: tests alongside code, mock mode for everything,
 | **M9: MCP tool and shot list** | `/mcp` server with brief tools and `shot_list`; shot list in pass 2, on every brief and on the brief page; MockProvider support | A Claude conversation with Match Cut and Cardboard connected turns a link plus the user's clips into an exported video, with confirmation before the edit |
 | **M10: Playbooks and saved skills** | Channel resolution, stats, scoring, feature extraction, comparison, playbook writing, validation, endpoints, playbook page, skills, MCP playbook tools, golden channels | A playbook for each of 10 golden channels passes faithfulness checks, and apply returns a valid prompt and shot list |
 | **M11: Own-channel insights** | Google sign-in, retention fetch, drop-offs mapped to beats, own-channel playbook, guardrail metric | A connected test channel shows drop-offs on the beat timeline and an own-channel playbook |
+
+M10 status (2026-11-28): built and tested in mock mode. All 10 golden mock channels pass the faithfulness checks, and apply returns a valid prompt and shot list (`pnpm eval -- --set playbooks`). Waiting on: the sign-off checklist above, real golden channels with human-written notes, and a real run (`--provider gemini --yes`).
