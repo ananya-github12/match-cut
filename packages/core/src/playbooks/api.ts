@@ -5,7 +5,15 @@
 import { z } from "zod";
 import type { Breakdown, BriefStatus } from "../schemas.js";
 import type { PlaybookRule } from "./writing.js";
-import { PLAYBOOK_DEFAULTS, PLAYBOOK_LIMITS, type NotEnoughDataReason } from "./scoring.js";
+import {
+  MIN_AGE_DAYS,
+  PLAYBOOK_DEFAULTS,
+  PLAYBOOK_LIMITS,
+  type NotEnoughDataReason,
+} from "./scoring.js";
+
+/** Re-exported for the web app (its copy names the age rule): uploads younger aren't scored. */
+export { MIN_AGE_DAYS };
 
 /** PRD stage list, in order. `watching` carries progress {done, total}. */
 export const PLAYBOOK_STAGES = [

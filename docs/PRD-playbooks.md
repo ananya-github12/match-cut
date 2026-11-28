@@ -545,20 +545,24 @@ Frontend notes (M10.9, for sign-off):
 - **Channel preview**: there's no preview endpoint for channels, so the name, handle and rounded subscribers appear when the playbook is created. The API resolves the channel before queueing, so this is within a second of pressing Build. Adding `GET /v1/channels/{ref}` would allow a preview before submit.
 - **Scatter**:
   - Log scale for the outlier score, so 0.5x and 2x sit the same distance from the median line.
-  - Compared breakouts are filled circles, typical Shorts filled squares, other Shorts small grey dots, and a breakout that couldn't be analyzed a hollow circle. Identity never relies on colour alone, and the palette passed the colour-blindness check in both themes.
+  - Compared breakouts are filled circles, typical Shorts filled squares, other Shorts small grey dots, and a breakout that couldn't be analyzed a hollow circle (with a legend entry). Identity never relies on colour alone.
+  - The palette passed the colour-blindness separation check, and every series is at least 3:1 against the surface, in both themes.
+  - Only compared points take keyboard focus, in date order, each with its own label; every Short is in the table view.
   - Uploads under 7 days old aren't plotted, and a note counts them.
   - Each dot has a hover and keyboard tooltip.
   - "How is the outlier score calculated?" and "Show as a table" are one click away.
 - **Rule cards**:
   - Example buttons open an embedded player at the moment cited.
-  - The counterexample opens that breakout from the start.
+  - The counterexample, labelled "A breakout without this:", opens that breakout from the start.
+  - The player opens inside the rule that was clicked and takes focus. A "Watch on YouTube" link covers creators who turned off embedding.
   - A caveat above the rules says they show what goes together, not proof of what caused the views.
-- **Warnings**: messages come from the warning table, with numbers filled in on the client, never server text.
+- **Warnings**: messages come from the warning table, with numbers filled in on the client, never server text. They sit with the rules, under the causation caveat, not above the chart.
 - **Apply**:
   - The panel's format "match" reads "9:16, like the channel's Shorts".
   - Send to Director shows the demo's stub acknowledgement, as v1 does.
 - **Save as skill**: the name defaults to "{channel} playbook". Brief skills can be saved through the API and MCP. The v1 result view has no Save button yet.
-- **Skills list**: name, source, last used, Apply (an inline apply panel) and Delete (with confirmation).
+- **Skills list**: name, source, last used, Apply (an inline apply panel) and Delete (with confirmation). Opening Apply shows how old the rules are ("Rules from {date}") and the saved playbook's caveats (small sample, shared topic, mixed formats, hidden likes). Warnings with numbers are left out, since those numbers described the playbook, not the rules.
+- **Failures and retries**: errors show wherever the user is. A retryable failed playbook offers "Try again", and too little data offers "Try 180 days". Both rebuild the request from the playbook itself (its channel and window), so they work after a reload.
 - **Live updates**:
   - As for briefs, events first, then polling if the stream drops.
   - The client gives up after 12 minutes (the worker's limit is 10).

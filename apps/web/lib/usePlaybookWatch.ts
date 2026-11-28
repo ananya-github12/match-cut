@@ -25,13 +25,14 @@ export function usePlaybookWatch(
   cb.current = { onUpdate, onGone };
 
   useEffect(() => {
+    // A new playbook, or none: whatever timed out before no longer applies.
+    setTimedOut(false);
     if (!playbookId) return;
     let stopped = false;
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
     let pollingSince = 0;
-    setTimedOut(false);
 
     const finish = () => {
       stopped = true;

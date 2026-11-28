@@ -62,7 +62,12 @@ test("a playbook: progress, scatter, rules with evidence, examples, apply and sa
     /youtube-nocookie\.com\/embed\/m\w+\?.*start=\d+/,
   );
 
-  // Apply: prompt and shots for the user's video, Copy and Send to Director.
+  // Apply: a length outside 5 to 600 explains itself; then prompt and shots, Copy, Director.
+  await page.getByLabel("Length (seconds)").fill("4");
+  await expect(
+    page.getByText("Use a length from 5 to 600 seconds, or leave it empty."),
+  ).toBeVisible();
+  await expect(page.getByTestId("apply-button")).toBeDisabled();
   await page.getByLabel("What are you making?").fill("a video about my coffee cart");
   await page.getByLabel("Length (seconds)").fill("30");
   await page.getByTestId("apply-button").click();
@@ -94,12 +99,19 @@ test("a playbook: progress, scatter, rules with evidence, examples, apply and sa
   const skill = page.getByTestId("skill").filter({ hasText: "Coffee cart hooks" });
   await expect(skill).toContainText("From a playbook: Mock Golden Channel 4");
   await expect(skill).toContainText("Not used yet");
-  await skill.getByRole("button", { name: "Apply" }).click();
+  await skill.getByRole("button", { name: "Apply Coffee cart hooks" }).click();
+  // The rules' age shows before they're applied.
+  await expect(skill.getByTestId("skill-age")).toHaveText(/^Rules from /);
   await skill.getByLabel("What are you making?").fill("my bakery");
   await skill.getByTestId("apply-button").click();
   await expect(skill.getByTestId("apply-prompt")).toContainText("my bakery");
   await expect(skill).toContainText(/Last used/);
   expect(await names(page)).toContain("skill_applied");
+
+  // Delete asks first.
+  page.once("dialog", (d) => void d.accept());
+  await skill.getByRole("button", { name: "Delete Coffee cart hooks" }).click();
+  await expect(page.getByTestId("skill").filter({ hasText: "Coffee cart hooks" })).toHaveCount(0);
 });
 
 test("a channel that doesn't exist shows the PRD's message", async ({ page }) => {
@@ -117,9 +129,34 @@ test("too little data explains what was found and offers a longer window", async
   await expect(box).toContainText("Not enough recent Shorts to compare", { timeout: 30_000 });
   await expect(box).toContainText("Too few recent Shorts");
   await expect(box).toContainText(/Shorts at least 7 days old: \d+ found, 10 needed/);
-  await expect(box.getByRole("button", { name: "Try 180 days" })).toBeVisible();
   await expect(box.getByRole("link", { name: "Analyze a single video instead" })).toBeVisible();
   expect(await names(page)).toContain("playbook_failed");
+  // Try 180 days builds again with the longer window (still too little data for this channel).
+  await box.getByRole("button", { name: "Try 180 days" }).click();
+  await expect
+    .poll(async () => (await names(page)).filter((n) => n === "playbook_started").length)
+    .toBe(2);
+  await expect(page.getByTestId("playbook-error")).toContainText("Too few recent Shorts");
+  await expect(page.getByRole("button", { name: "Try 180 days" })).toHaveCount(0);
+});
+
+test("warnings come from the PRD table, next to the rules", async ({ page }) => {
+  await openPlaybooks(page);
+  await build(page, "@mockmixed");
+  await expect(page.getByTestId("scatter")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId("playbook-warning").first()).toBeVisible();
+  await expect(
+    page.getByText("This channel also posts long videos; only its Shorts were compared."),
+  ).toBeVisible();
+});
+
+test("reloading mid-run picks the playbook up again", async ({ page }) => {
+  await openPlaybooks(page);
+  await build(page, "@mockgolden07");
+  await expect(page.getByTestId("progress")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("channel-preview")).toContainText("@mockgolden07");
+  await expect(page.getByTestId("scatter")).toBeVisible({ timeout: 45_000 });
 });
 
 test("a running playbook can be cancelled", async ({ page }) => {

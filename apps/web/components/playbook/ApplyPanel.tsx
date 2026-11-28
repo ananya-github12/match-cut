@@ -1,7 +1,8 @@
 "use client";
 /**
  * Apply panel (PRD-playbooks.md, Frontend additions): goal, format and length; returns a prompt
- * and shot list with Copy and Send to Director. Used for a playbook and for a saved skill.
+ * and shot list with Copy and Send to Director. Used for a playbook and for a saved skill, so the
+ * heading level comes from where it sits.
  */
 import type { ApplyResponse } from "@match-cut/core/playbooks/apply";
 import { GOAL_MAX_CHARS } from "@match-cut/core/schemas";
@@ -15,6 +16,8 @@ import css from "./playbook.module.css";
 
 export function ApplyPanel(props: {
   idPrefix: string;
+  /** The panel's heading level: 2 on the playbook page, 3 inside a skill row. */
+  level: 2 | 3;
   apply: (body: ApplyBody) => Promise<ApplyResponse>;
   onApplied: (result: ApplyResponse, body: ApplyBody) => void;
   onSendToDirector: () => void;
@@ -25,18 +28,21 @@ export function ApplyPanel(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<UiError | null>(null);
   const [result, setResult] = useState<ApplyResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const [sent, setSent] = useState(false);
 
   const lengthSeconds = length === "" ? null : Number(length);
   const lengthValid =
     lengthSeconds === null ||
     (Number.isInteger(lengthSeconds) && lengthSeconds >= 5 && lengthSeconds <= 600);
+  const H = `h${props.level}` as const;
+  const Sub = `h${props.level + 1}` as "h3" | "h4";
+  const id = (s: string) => `${props.idPrefix}-${s}`;
 
   const submit = async () => {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopy("idle");
     setSent(false);
     const body: ApplyBody = {
       ...(goal.trim() ? { goal: goal.trim() } : {}),
@@ -54,20 +60,20 @@ export function ApplyPanel(props: {
     }
   };
 
-  const copy = async () => {
+  const copyPrompt = async () => {
     if (!result) return;
     try {
       await navigator.clipboard.writeText(result.cardboard_prompt);
+      setCopy("copied");
     } catch {
-      /* clipboard can be blocked */
+      // Blocked clipboard: say so instead of claiming it worked.
+      setCopy("failed");
     }
-    setCopied(true);
   };
 
-  const id = (s: string) => `${props.idPrefix}-${s}`;
   return (
-    <div className={css.card} data-testid="apply-panel">
-      <h3 className={css.sectionTitle}>{P.applyTitle}</h3>
+    <div className={css.card} data-testid="apply-panel" id={props.idPrefix}>
+      <H className={css.sectionTitle}>{P.applyTitle}</H>
       <div className={css.field}>
         <label className={css.label} htmlFor={id("goal")}>
           {P.goalLabel}
@@ -112,6 +118,7 @@ export function ApplyPanel(props: {
             value={length}
             onChange={(e) => setLength(e.target.value.replace(/[^0-9]/g, ""))}
             aria-invalid={!lengthValid}
+            aria-describedby={lengthValid ? undefined : id("length-error")}
           />
         </div>
         <button
@@ -124,14 +131,22 @@ export function ApplyPanel(props: {
           {busy ? P.applying : P.apply}
         </button>
       </div>
+      {!lengthValid && (
+        <div className={css.fieldError} id={id("length-error")}>
+          {P.lengthInvalid}
+        </div>
+      )}
       {error && (
         <div className={css.error} role="alert">
           {error.message}
         </div>
       )}
+      <div className="visually-hidden" role="status">
+        {result && !busy ? P.applyDone : ""}
+      </div>
       {result && (
         <div className={css.card} data-testid="apply-result">
-          <h4 className={css.sectionTitle}>{P.promptTitle}</h4>
+          <Sub className={css.sectionTitle}>{P.promptTitle}</Sub>
           <pre className={css.prompt} data-testid="apply-prompt">
             {result.cardboard_prompt}
           </pre>
@@ -146,15 +161,14 @@ export function ApplyPanel(props: {
             >
               {S.sendToDirector}
             </button>
-            <button type="button" className={css.btn} onClick={copy} aria-live="polite">
-              {copied ? S.copied : S.copy}
+            <button type="button" className={css.btn} onClick={copyPrompt}>
+              {copy === "copied" ? S.copied : S.copy}
             </button>
           </div>
-          {sent && (
-            <div className={css.note} role="status">
-              {S.directorAck}
-            </div>
-          )}
+          <div role="status">
+            {copy === "failed" && <div className={css.note}>{P.copyFailed}</div>}
+            {sent && <div className={css.note}>{S.directorAck}</div>}
+          </div>
           {result.warnings.map((w) => {
             const text = warningText(w.code);
             return text ? (
@@ -165,7 +179,7 @@ export function ApplyPanel(props: {
           })}
           {result.shot_list.length > 0 && (
             <>
-              <h4 className={css.sectionTitle}>{P.shotsTitle}</h4>
+              <Sub className={css.sectionTitle}>{P.shotsTitle}</Sub>
               <ol className={css.list} data-testid="apply-shots">
                 {result.shot_list.map((s, i) => (
                   <li key={i}>

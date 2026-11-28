@@ -6,7 +6,7 @@
  * The channel's name and subscribers appear as soon as the API resolves it (before the job runs).
  */
 import { PLAYBOOK_WARNINGS, type PlaybookWarningCode } from "@match-cut/core/errors";
-import type { PlaybookResponse } from "@match-cut/core/playbooks/api";
+import { MIN_AGE_DAYS, type PlaybookResponse } from "@match-cut/core/playbooks/api";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detectPlatform, track, type EventContext } from "../../lib/analytics";
@@ -38,6 +38,9 @@ const ORDER = [
   "writing_playbook",
   "validating",
 ];
+const WINDOWS = P.windowOptions.map((o) => o.value);
+/** IDs from the API, checked before they go into an embed URL. */
+const VIDEO_ID = /^[A-Za-z0-9_-]{6,20}$/;
 
 const session = {
   get: () => {
@@ -65,7 +68,20 @@ export function playbookWarningText(code: string, p: PlaybookResponse): string |
   ).length;
   return PLAYBOOK_WARNINGS[code as PlaybookWarningCode]
     .replace("{count}", String(code === "VIDEOS_SKIPPED" ? skipped : (p.window?.too_new ?? 0)))
-    .replace("{days}", "7");
+    .replace("{days}", String(MIN_AGE_DAYS));
+}
+
+/** What to send to build this playbook again: its channel and its window. */
+function requestFor(p: PlaybookResponse): { channel: string; days: number } | null {
+  const channel = p.channel?.handle
+    ? `@${p.channel.handle}`
+    : p.channel
+      ? `https://www.youtube.com/channel/${p.channel.id}`
+      : null;
+  if (!channel) return null;
+  const span = p.window ? (Date.parse(p.window.to) - Date.parse(p.window.from)) / 86_400_000 : 90;
+  const days = WINDOWS.reduce((best, d) => (Math.abs(d - span) < Math.abs(best - span) ? d : best));
+  return { channel, days };
 }
 
 const ts = (seconds: number) =>
@@ -85,12 +101,14 @@ export function PlaybookPage() {
   const [error, setError] = useState<UiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [player, setPlayer] = useState<{ id: string; start: number } | null>(null);
+  const [player, setPlayer] = useState<{ id: string; start: number; rule: string } | null>(null);
   const [skillName, setSkillName] = useState("");
   const [skillState, setSkillState] = useState<"idle" | "saving" | "saved">("idle");
   const [skillError, setSkillError] = useState<UiError | null>(null);
   const reported = useRef<string | null>(null);
   const idemKey = useRef(newIdempotencyKey());
+  const submitted = useRef(false);
+  const playerRef = useRef<HTMLDivElement>(null);
 
   const ctx = useCallback(
     (): EventContext => ({ project_id: "standalone", platform, entry_point: "playbook_page" }),
@@ -100,6 +118,7 @@ export function PlaybookPage() {
   const onUpdate = useCallback(
     (p: PlaybookResponse) => {
       setPlaybook(p);
+      if (p.channel) setSkillName((n) => n || `${p.channel!.title} playbook`);
       if (reported.current === `${p.id}:${p.status}`) return;
       if (p.status === "succeeded") {
         reported.current = `${p.id}:${p.status}`;
@@ -121,34 +140,53 @@ export function PlaybookPage() {
     setPlaybook(null);
   });
 
-  // Resume the playbook this tab was following (e.g. after a reload).
+  // Resume the playbook this tab was following (e.g. after a reload), unless the user has
+  // already started another one by the time it loads.
   useEffect(() => {
     const id = session.get();
     if (!id || params.get("channel")) return;
+    let ignore = false;
     void getPlaybook(id)
       .then((p) => {
-        setPlaybook(p);
+        if (ignore || submitted.current) return;
+        onUpdate(p);
         if (p.status === "queued" || p.status === "processing") setWatchId(p.id);
       })
-      .catch(() => session.set(null));
-  }, [params]);
+      .catch((e) => {
+        if (e instanceof ApiFailure && e.status === 404) session.set(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [params, onUpdate]);
 
-  const start = async (days = windowDays) => {
+  // The example player opens inside the rule that was clicked; bring it into view.
+  useEffect(() => {
+    if (!player) return;
+    playerRef.current?.scrollIntoView?.({ block: "nearest" });
+    playerRef.current?.focus();
+  }, [player]);
+
+  const start = async (req = { channel: channel.trim(), days: windowDays }) => {
+    submitted.current = true;
     setBusy(true);
     setError(null);
     setSkillState("idle");
+    setSkillError(null);
+    setSkillName("");
     setPlayer(null);
     try {
       const { status, playbook: p } = await createPlaybook(
-        { source: { channel: channel.trim() }, window_days: days },
+        { source: { channel: req.channel }, window_days: req.days },
         idemKey.current,
       );
       idemKey.current = newIdempotencyKey();
       track("playbook_started", ctx(), { playbook_id: p.id, repeat: status === 200 });
       session.set(p.id);
+      setChannel(req.channel);
+      setWindowDays(req.days);
       onUpdate(p);
       setWatchId(status === 200 ? null : p.id);
-      setSkillName(p.channel ? `${p.channel.title} playbook` : "");
     } catch (e) {
       const f = e instanceof ApiFailure ? e : new ApiFailure("INTERNAL", 0);
       setError(uiError(f.code, f.retryAfterSeconds));
@@ -160,11 +198,15 @@ export function PlaybookPage() {
   const cancel = async () => {
     if (!playbook) return;
     setCancelling(true);
+    setError(null);
     try {
       await deletePlaybook(playbook.id);
       setPlaybook({ ...playbook, status: "cancelled", stage: null });
       setWatchId(null);
       session.set(null);
+    } catch (e) {
+      const f = e instanceof ApiFailure ? e : new ApiFailure("INTERNAL", 0);
+      setError(uiError(f.code, f.retryAfterSeconds));
     } finally {
       setCancelling(false);
     }
@@ -194,14 +236,23 @@ export function PlaybookPage() {
   };
 
   const running = playbook && (playbook.status === "queued" || playbook.status === "processing");
+  const again = playbook ? requestFor(playbook) : null;
   const titles = useMemo(
     () => new Map((playbook?.videos ?? []).map((v) => [v.id, v.title])),
     [playbook?.videos],
   );
-  const play = (videoId: string, at: string, feature: string) => {
-    setPlayer({ id: videoId, start: secondsOf(at) });
+  const play = (videoId: string, at: string, rule: string, feature: string) => {
+    if (!VIDEO_ID.test(videoId)) return;
+    setPlayer({ id: videoId, start: secondsOf(at), rule });
     track("rule_example_played", ctx(), { playbook_id: playbook?.id, feature, video_id: videoId });
   };
+  const stageLabel = running
+    ? playbook.stage === "watching" && playbook.progress
+      ? P.watching(playbook.progress.done, playbook.progress.total)
+      : (P.stages[playbook.stage ?? "queued"] ?? P.stages.queued)
+    : "";
+  const failure =
+    playbook?.status === "failed" ? uiError(playbook.error?.code ?? "INTERNAL") : null;
 
   return (
     <div className={css.page}>
@@ -209,6 +260,10 @@ export function PlaybookPage() {
       <div>
         <h1 className={css.title}>{P.pageTitle}</h1>
         <p className={css.muted}>{P.intro}</p>
+      </div>
+      {/* Mounted from the start, so screen readers announce the first stage too. */}
+      <div className="visually-hidden" aria-live="polite">
+        {stageLabel}
       </div>
 
       {!playbook && (
@@ -263,12 +318,14 @@ export function PlaybookPage() {
             </button>
           </div>
           <div className={css.muted}>{P.publicOnly}</div>
-          {error && (
-            <div className={css.error} role="alert" id="pb-error">
-              {error.message}
-            </div>
-          )}
         </form>
+      )}
+
+      {/* Shown wherever the user is: the form, the failed card or a running playbook. */}
+      {error && (
+        <div className={css.error} role="alert" id="pb-error">
+          {error.message}
+        </div>
       )}
 
       {playbook?.channel && (
@@ -288,14 +345,7 @@ export function PlaybookPage() {
         <div className={css.card} data-testid="progress">
           <div className={css.stage}>
             <span className={css.spinner} aria-hidden="true" />
-            <span data-testid="stage-label">
-              {playbook.stage === "watching" && playbook.progress
-                ? P.watching(playbook.progress.done, playbook.progress.total)
-                : (P.stages[playbook.stage ?? "queued"] ?? P.stages.queued)}
-            </span>
-          </div>
-          <div className="visually-hidden" aria-live="polite">
-            {P.stages[playbook.stage ?? "queued"]}
+            <span data-testid="stage-label">{stageLabel}</span>
           </div>
           <div className={css.steps} aria-hidden="true">
             {ORDER.map((s, i) => (
@@ -307,6 +357,7 @@ export function PlaybookPage() {
           </div>
           <div className={css.muted}>{P.estimate}</div>
           {connection === "offline" && <div className={css.note}>{S.offlineWaiting}</div>}
+          {timedOut && <div className={css.note}>{P.timedOut}</div>}
           <div className={css.actions}>
             <button type="button" className={css.btn} onClick={cancel} disabled={cancelling}>
               {P.cancel}
@@ -314,11 +365,10 @@ export function PlaybookPage() {
           </div>
         </div>
       )}
-      {timedOut && <div className={css.note}>{P.timedOut}</div>}
 
       {playbook?.status === "cancelled" && (
         <div className={css.card}>
-          <div>{P.cancelled}</div>
+          <div role="status">{P.cancelled}</div>
           <div className={css.actions}>
             <button type="button" className={css.btn} onClick={reset}>
               {P.newPlaybook}
@@ -327,13 +377,13 @@ export function PlaybookPage() {
         </div>
       )}
 
-      {playbook?.status === "failed" && (
+      {playbook?.status === "failed" && failure && (
         <div className={css.card} data-testid="playbook-error">
           {playbook.not_enough_data ? (
             <>
               <h2 className={css.sectionTitle}>{P.notEnoughTitle}</h2>
               <div className={css.error} role="alert">
-                {uiError("NOT_ENOUGH_DATA").message}
+                {failure.message}
               </div>
               <ul className={css.list}>
                 {playbook.not_enough_data.reasons.map((r) => (
@@ -345,7 +395,7 @@ export function PlaybookPage() {
                   {P.found(
                     playbook.not_enough_data.found.shorts_eligible,
                     playbook.not_enough_data.minimums.shorts_eligible,
-                    P.foundShorts,
+                    P.foundShorts(MIN_AGE_DAYS),
                   )}
                 </li>
                 <li>
@@ -364,14 +414,12 @@ export function PlaybookPage() {
                 </li>
               </ul>
               <div className={css.actions}>
-                {windowDays < 180 && (
+                {again && again.days < 180 && (
                   <button
                     type="button"
                     className={`${css.btn} ${css.primary}`}
-                    onClick={() => {
-                      setWindowDays(180);
-                      void start(180);
-                    }}
+                    disabled={busy}
+                    onClick={() => void start({ channel: again.channel, days: 180 })}
                   >
                     {P.tryLonger}
                   </button>
@@ -387,9 +435,19 @@ export function PlaybookPage() {
           ) : (
             <>
               <div className={css.error} role="alert">
-                {uiError(playbook.error?.code ?? "INTERNAL").message}
+                {failure.message}
               </div>
               <div className={css.actions}>
+                {again && playbook.error?.retryable && (
+                  <button
+                    type="button"
+                    className={`${css.btn} ${css.primary}`}
+                    disabled={busy}
+                    onClick={() => void start(again)}
+                  >
+                    {P.retry}
+                  </button>
+                )}
                 <button type="button" className={css.btn} onClick={reset}>
                   {P.newPlaybook}
                 </button>
@@ -410,14 +468,6 @@ export function PlaybookPage() {
               )}
             </div>
           )}
-          {playbook.warnings.map((w) => {
-            const text = playbookWarningText(w.code, playbook);
-            return text ? (
-              <div key={w.code} className={css.note} data-testid="playbook-warning">
-                {text}
-              </div>
-            ) : null;
-          })}
 
           <section className={css.card} aria-labelledby="pb-scatter">
             <h2 className={css.sectionTitle} id="pb-scatter">
@@ -430,73 +480,95 @@ export function PlaybookPage() {
             <h2 className={css.sectionTitle} id="pb-rules">
               {P.rulesTitle}
             </h2>
-            <p className={css.muted}>{P.rulesCaveat}</p>
+            <p className={css.note}>{P.rulesCaveat}</p>
+            {/* The playbook's caveats (small sample, shared topic...) sit with its rules. */}
+            {playbook.warnings.map((w) => {
+              const text = playbookWarningText(w.code, playbook);
+              return text ? (
+                <div key={w.code} className={css.note} data-testid="playbook-warning">
+                  {text}
+                </div>
+              ) : null;
+            })}
             {playbook.rules && playbook.rules.length > 0 ? (
               <div className={css.rules}>
-                {playbook.rules.map((r) => (
-                  <article key={`${r.feature}=${r.value}`} className={css.rule} data-testid="rule">
-                    <div className={css.ruleHead}>
-                      <span className={css.ruleTitle}>{r.title}</span>
-                      <span
-                        className={`${css.badge} ${r.confidence === "medium" ? css.badgeMedium : ""}`}
-                      >
-                        {P.confidence[r.confidence]}
-                      </span>
-                    </div>
-                    <div className={css.evidence} data-testid="evidence">
-                      {P.evidence(
-                        r.evidence.outliers_with,
-                        r.evidence.outliers_known,
-                        r.evidence.typical_with,
-                        r.evidence.typical_known,
+                {playbook.rules.map((r) => {
+                  const key = `${r.feature}=${r.value}`;
+                  return (
+                    <article key={key} className={css.rule} data-testid="rule">
+                      <div className={css.ruleHead}>
+                        <h3 className={css.ruleTitle}>{r.title}</h3>
+                        <span
+                          className={`${css.badge} ${r.confidence === "medium" ? css.badgeMedium : ""}`}
+                        >
+                          {P.confidence[r.confidence]}
+                        </span>
+                      </div>
+                      <div className={css.evidence} data-testid="evidence">
+                        {P.evidence(
+                          r.evidence.outliers_with,
+                          r.evidence.outliers_known,
+                          r.evidence.typical_with,
+                          r.evidence.typical_known,
+                        )}
+                      </div>
+                      <div>{r.how_to}</div>
+                      {r.examples.length > 0 && (
+                        <div className={css.examples}>
+                          {r.examples.map((ex) => (
+                            <button
+                              key={`${ex.video_id}@${ex.timestamp}`}
+                              type="button"
+                              className={css.linkBtn}
+                              onClick={() => play(ex.video_id, ex.timestamp, key, r.feature)}
+                            >
+                              {P.watchExample(
+                                `"${titles.get(ex.video_id) ?? ex.video_id}"`,
+                                ts(secondsOf(ex.timestamp)),
+                              )}
+                            </button>
+                          ))}
+                        </div>
                       )}
-                    </div>
-                    <div>{r.how_to}</div>
-                    {r.examples.length > 0 && (
-                      <div className={css.examples}>
-                        {r.examples.map((ex) => (
+                      {r.counterexample && (
+                        <div className={css.muted}>
+                          {P.counterexample}{" "}
                           <button
-                            key={`${ex.video_id}@${ex.timestamp}`}
                             type="button"
                             className={css.linkBtn}
-                            onClick={() => play(ex.video_id, ex.timestamp, r.feature)}
+                            onClick={() => play(r.counterexample!, "00:00", key, r.feature)}
                           >
-                            {P.watchExample(
-                              `"${titles.get(ex.video_id) ?? ex.video_id}"`,
-                              ts(secondsOf(ex.timestamp)),
-                            )}
+                            {`"${titles.get(r.counterexample) ?? r.counterexample}"`}
                           </button>
-                        ))}
-                      </div>
-                    )}
-                    {r.counterexample && (
-                      <div className={css.muted}>
-                        {P.counterexample}{" "}
-                        <button
-                          type="button"
-                          className={css.linkBtn}
-                          onClick={() => play(r.counterexample!, "00:00", r.feature)}
-                        >
-                          {`"${titles.get(r.counterexample) ?? r.counterexample}"`}
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                ))}
+                        </div>
+                      )}
+                      {player?.rule === key && (
+                        <div className={css.playerWrap} ref={playerRef} tabIndex={-1}>
+                          <iframe
+                            key={`${player.id}@${player.start}`}
+                            className={css.player}
+                            title={P.playerTitle(titles.get(player.id) ?? player.id)}
+                            // Privacy-enhanced embed; it plays only after the user picks an example.
+                            src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(player.id)}?rel=0&autoplay=1&start=${player.start}`}
+                            allow="autoplay; encrypted-media; picture-in-picture"
+                            data-testid="example-player"
+                          />
+                          {/* For creators who turned off embedding. */}
+                          <a
+                            href={`https://www.youtube.com/watch?v=${encodeURIComponent(player.id)}&t=${player.start}s`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {P.watchOnYouTube}
+                          </a>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <div className={css.note}>{P.noRules}</div>
-            )}
-            {player && (
-              <iframe
-                key={`${player.id}@${player.start}`}
-                className={css.player}
-                title={P.playerTitle}
-                // Privacy-enhanced embed; it plays only after the user picks an example.
-                src={`https://www.youtube-nocookie.com/embed/${player.id}?rel=0&autoplay=1&start=${player.start}`}
-                allow="autoplay; encrypted-media; picture-in-picture"
-                data-testid="example-player"
-              />
             )}
           </section>
 
@@ -517,6 +589,7 @@ export function PlaybookPage() {
             <>
               <ApplyPanel
                 idPrefix="pb-apply"
+                level={2}
                 apply={(body) => applyPlaybook(playbook.id, body)}
                 onApplied={(r, body) =>
                   track("playbook_applied", ctx(), {
@@ -546,7 +619,10 @@ export function PlaybookPage() {
                       className={css.input}
                       maxLength={80}
                       value={skillName}
-                      onChange={(e) => setSkillName(e.target.value)}
+                      onChange={(e) => {
+                        setSkillName(e.target.value);
+                        if (skillState === "saved") setSkillState("idle");
+                      }}
                     />
                   </div>
                   <button
@@ -559,11 +635,13 @@ export function PlaybookPage() {
                     {P.save}
                   </button>
                 </div>
-                {skillState === "saved" && (
-                  <div className={css.note} role="status">
-                    {P.saved} <a href="/skills">{P.navSkills}</a>
-                  </div>
-                )}
+                <div role="status">
+                  {skillState === "saved" && (
+                    <div className={css.note}>
+                      {P.saved} <a href="/skills">{P.navSkills}</a>
+                    </div>
+                  )}
+                </div>
                 {skillError && (
                   <div className={css.error} role="alert">
                     {skillError.message}

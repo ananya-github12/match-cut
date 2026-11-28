@@ -172,18 +172,23 @@
 }
 
 /* Scatter */
+/* Validated with the dataviz palette checker (CVD separation, >= 3:1 against each surface). */
 .chart {
   --series-breakout: #3b37d6;
-  --series-typical: #f47230;
-  --series-other: #9a9aa3;
-  position: relative;
+  --series-typical: #c4560f;
+  --series-other: #75757e;
+  display: grid;
+  gap: 8px;
 }
 @media (prefers-color-scheme: dark) {
   .chart {
     --series-breakout: #8f8cff;
     --series-typical: #e76624;
-    --series-other: #6e6e78;
+    --series-other: #8a8a94;
   }
+}
+.plot {
+  position: relative;
 }
 .chart svg {
   width: 100%;
@@ -306,6 +311,7 @@
 .ruleTitle {
   font-weight: 650;
   font-size: 15px;
+  margin: 0;
 }
 .badge {
   font-size: 12px;
@@ -374,4 +380,18 @@
 }
 .skillName {
   font-weight: 650;
+  font-size: 16px;
+  margin: 0;
+}
+.fieldError {
+  color: var(--danger);
+  font-size: 13px;
+}
+.playerWrap {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.playerWrap:focus {
+  outline: none;
 }

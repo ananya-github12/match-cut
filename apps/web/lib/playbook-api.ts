@@ -71,6 +71,10 @@ export async function listSkills(): Promise<SkillSummaryResponse[]> {
   return ((await (await call("skills")).json()) as { skills: SkillSummaryResponse[] }).skills;
 }
 
+export async function getSkill(id: string): Promise<SkillResponse> {
+  return (await call(`skills/${id}`)).json();
+}
+
 export async function deleteSkill(id: string): Promise<void> {
   await call(`skills/${id}`, { method: "DELETE" });
 }
