@@ -145,3 +145,16 @@
     height: 100vh;
   }
 }
+
+.topnav {
+  display: flex;
+  gap: 14px;
+  font-size: 14px;
+}
+.topnav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.topnav a:hover {
+  color: var(--fg);
+}

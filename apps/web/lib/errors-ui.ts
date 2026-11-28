@@ -37,6 +37,15 @@ const ACTIONS: Record<string, ErrorAction> = {
   INVALID_MODEL_OUTPUT: "retry",
   INTERNAL: "retry",
   OFFLINE: "retryWhenOnline",
+  // PRD-playbooks.md.
+  CHANNEL_NOT_FOUND: "focusLink",
+  NOT_ENOUGH_DATA: "tryAnother",
+  YOUTUBE_NOT_CONNECTED: "tryAnother",
+  PLAYBOOK_NOT_FOUND: "tryAnother",
+  PLAYBOOK_NOT_AVAILABLE: "tryAnother",
+  PLAYBOOK_HAS_NO_RULES: "tryAnother",
+  SKILL_NOT_FOUND: "tryAnother",
+  SKILL_LIMIT_REACHED: "tryAnother",
 };
 
 /** Codes the user fixes in the input panel (shown under the field, before or after submit). */
@@ -69,6 +78,8 @@ export function uiError(code: string, retryAfterSeconds?: number): UiError {
     const minutes = Math.max(1, Math.ceil((retryAfterSeconds ?? 60) / 60));
     message = message.replace("{minutes}", String(minutes));
   }
+  // PRD-playbooks.md: 50 skills per user.
+  message = message.replace("{limit}", "50");
   return { code: known, message, action: ACTIONS[known] ?? "retry", retryAfterSeconds };
 }
 

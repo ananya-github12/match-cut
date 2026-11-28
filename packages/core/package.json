@@ -10,7 +10,9 @@
     "./youtube-channel": "./src/youtube-channel.ts",
     "./timecode": "./src/timecode.ts",
     "./video": "./src/video.ts",
-    "./schemas": "./src/schemas.ts"
+    "./schemas": "./src/schemas.ts",
+    "./playbooks/api": "./src/playbooks/api.ts",
+    "./playbooks/apply": "./src/playbooks/apply.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

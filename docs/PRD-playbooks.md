@@ -539,6 +539,38 @@ YouTube Data API quota exhaustion maps to the existing `CAPACITY_EXHAUSTED`.
 - **Skills list**: name, source, last used, Apply.
 - Analytics events: `playbook_started`, `playbook_completed`, `playbook_failed`, `rule_example_played`, `playbook_applied`, `skill_saved`, `skill_applied`, `shot_list_viewed`.
 
+Frontend notes (M10.9, for sign-off):
+
+- **Routes**: `/playbooks` (and `/playbooks?channel=@name`) and `/skills`, linked from the editor's top bar.
+- **Channel preview**: there's no preview endpoint for channels, so the name, handle and rounded subscribers appear when the playbook is created. The API resolves the channel before queueing, so this is within a second of pressing Build. Adding `GET /v1/channels/{ref}` would allow a preview before submit.
+- **Scatter**:
+  - Log scale for the outlier score, so 0.5x and 2x sit the same distance from the median line.
+  - Compared breakouts are filled circles, typical Shorts filled squares, other Shorts small grey dots, and a breakout that couldn't be analyzed a hollow circle. Identity never relies on colour alone, and the palette passed the colour-blindness check in both themes.
+  - Uploads under 7 days old aren't plotted, and a note counts them.
+  - Each dot has a hover and keyboard tooltip.
+  - "How is the outlier score calculated?" and "Show as a table" are one click away.
+- **Rule cards**:
+  - Example buttons open an embedded player at the moment cited.
+  - The counterexample opens that breakout from the start.
+  - A caveat above the rules says they show what goes together, not proof of what caused the views.
+- **Warnings**: messages come from the warning table, with numbers filled in on the client, never server text.
+- **Apply**:
+  - The panel's format "match" reads "9:16, like the channel's Shorts".
+  - Send to Director shows the demo's stub acknowledgement, as v1 does.
+- **Save as skill**: the name defaults to "{channel} playbook". Brief skills can be saved through the API and MCP. The v1 result view has no Save button yet.
+- **Skills list**: name, source, last used, Apply (an inline apply panel) and Delete (with confirmation).
+- **Live updates**:
+  - As for briefs, events first, then polling if the stream drops.
+  - The client gives up after 12 minutes (the worker's limit is 10).
+  - The running playbook resumes after a reload.
+- **Copy**: all new strings are in `apps/web/lib/playbook-strings.ts`, drafted for sign-off: stage labels, the scatter and formula text, the rule caveat, the not-enough-data view, and apply, save and skills copy.
+- **Tests**: Playwright e2e in mock mode covers the full flow:
+  - progress with "Watching N of M", the scatter and formula, evidence wording, an example clip, apply, Copy, Send to Director, and save and apply a skill;
+  - channel not found, not enough data, cancel, and the editor links;
+  - the analytics events.
+
+  Each e2e run gets its own Redis namespace, so the shared 24-hour playbook cache can't hide the progress view.
+
 ## Cost, limits and caching
 
 | Item | Estimate |

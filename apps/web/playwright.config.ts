@@ -36,8 +36,9 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       PROVIDER: "mock",
-      // Separate Redis keys, channels and queue from dev data.
-      REDIS_NAMESPACE: "mc-e2e",
+      // Separate Redis keys, channels and queue from dev data, and from earlier runs: caches
+      // (e.g. the 24-hour playbook cache) work within a run but never leak into the next.
+      REDIS_NAMESPACE: `mc-e2e-${Date.now().toString(36)}`,
       API_PORT: String(API_PORT),
       WEB_PORT: String(WEB_PORT),
       WEB_ORIGIN: `http://localhost:${WEB_PORT}`,

@@ -3,8 +3,10 @@
  * Stand-in for Cardboard's editor: a project canvas and the AI Chat panel. Match Cut lives inside
  * the chat panel, so users never leave their project (PRD "Platforms and entry points").
  */
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
+import { P } from "../../lib/playbook-strings";
 import { projectFromQuery } from "../../lib/project";
 import { ChatPanel } from "./ChatPanel";
 import css from "./editor.module.css";
@@ -23,6 +25,11 @@ export function EditorShell({ deepLinkUrl }: { deepLinkUrl?: string }) {
               {project.lengthSeconds ? `${project.lengthSeconds} s` : "any length"}
             </div>
           </div>
+          {/* M10: learn from a channel, and reuse saved skills. */}
+          <nav className={css.topnav} aria-label="Match Cut">
+            <Link href="/playbooks">{P.navPlaybooks}</Link>
+            <Link href="/skills">{P.navSkills}</Link>
+          </nav>
         </div>
         <div className={css.canvas}>
           Your footage and timeline would be here. This demo stubs Cardboard&apos;s editor; Match

@@ -1,7 +1,7 @@
 /**
  * Same-origin proxy to the Match Cut API. It stands in for Cardboard's session: the browser never
  * holds a token, and server-sent events work with the browser's EventSource. It forwards only
- * /v1/briefs and /v1/videos routes, so it can't be used to reach anything else.
+ * /v1/briefs, /v1/videos, /v1/playbooks and /v1/skills routes, so it can't reach anything else.
  * PRD: "Never call Gemini or the YouTube Data API from the client."
  *
  * Each browser gets an anonymous visitor ID (HTTP-only cookie), sent to the API as the user, so
@@ -21,7 +21,8 @@ export const runtime = "nodejs";
 // Event streams stay open while a job runs; past this the client falls back to polling.
 export const maxDuration = 300;
 
-const ALLOWED = /^(briefs(\/[A-Za-z0-9_]+(\/(events|regenerate))?)?|videos\/[A-Za-z0-9_-]{11})$/;
+const ALLOWED =
+  /^(briefs(\/[A-Za-z0-9_]+(\/(events|regenerate))?)?|videos\/[A-Za-z0-9_-]{11}|playbooks(\/[A-Za-z0-9_]+(\/(events|apply))?)?|skills(\/[A-Za-z0-9_]+(\/apply)?)?)$/;
 const PASS_REQUEST = ["content-type", "idempotency-key", "accept"];
 const PASS_RESPONSE = ["content-type", "retry-after", "cache-control", "location"];
 const VISITOR_COOKIE = "mc_visitor";

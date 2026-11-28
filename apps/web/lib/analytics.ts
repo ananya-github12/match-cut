@@ -3,7 +3,14 @@
  * entry_point. In dev, events go to the console and to window.__matchCutEvents (for tests).
  */
 export type Platform = "web" | "mac" | "mobile_web";
-export type EntryPoint = "paste_card" | "chat_action" | "slash_command" | "director" | "deep_link";
+export type EntryPoint =
+  | "paste_card"
+  | "chat_action"
+  | "slash_command"
+  | "director"
+  | "deep_link"
+  | "playbook_page"
+  | "skills_page";
 
 export type EventName =
   | "match_opened"
@@ -20,7 +27,15 @@ export type EventName =
   | "beat_clicked"
   | "shot_list_viewed"
   | "brief_feedback"
-  | "brief_deleted";
+  | "brief_deleted"
+  // PRD-playbooks.md, Frontend additions.
+  | "playbook_started"
+  | "playbook_completed"
+  | "playbook_failed"
+  | "rule_example_played"
+  | "playbook_applied"
+  | "skill_saved"
+  | "skill_applied";
 
 export interface EventContext {
   project_id: string;
