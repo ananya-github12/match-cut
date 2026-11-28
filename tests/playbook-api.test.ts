@@ -6,6 +6,7 @@ import { buildApp, type AppDeps } from "@match-cut/api/app";
 import { memoryDeps } from "@match-cut/api/testing";
 import {
   loadPricing,
+  playbookInflightKey,
   SKILLS_PER_USER,
   type PlaybookResponse,
   type SkillResponse,
@@ -21,7 +22,14 @@ import {
   SpendTracker,
   type PlaybookJobData,
 } from "@match-cut/infra";
-import { MOCK_FAULT_IDS, MOCK_VIDEOS, MockAnalyzer, MockChannelLookup } from "@match-cut/providers";
+import {
+  CachedChannelLookup,
+  MOCK_FAULT_IDS,
+  MOCK_VIDEOS,
+  MockAnalyzer,
+  MockChannelLookup,
+  type ChannelLookup,
+} from "@match-cut/providers";
 import { runJob } from "@match-cut/worker/pipeline";
 import { runPlaybookJob } from "@match-cut/worker/playbook-pipeline";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -36,6 +44,8 @@ function setup(
     autoRun?: boolean;
     app?: Partial<AppDeps>;
     playbooksPerDay?: number;
+    orgPlaybooksPerDay?: number;
+    channels?: ChannelLookup;
     pricing?: ReturnType<typeof loadPricing>;
   } = {},
 ) {
@@ -48,12 +58,13 @@ function setup(
       regeneratePerHour: 100,
       orgPerDay: 1000,
       playbooksPerDay: opts.playbooksPerDay ?? 50,
+      orgPlaybooksPerDay: opts.orgPlaybooksPerDay,
     }),
   );
   const pbQueue = new MemoryPlaybookQueue();
   const briefQueue = new MemoryJobQueue();
   const analyzer = new MockAnalyzer();
-  const channels = new MockChannelLookup();
+  const channels = opts.channels ?? new MockChannelLookup();
   const base = memoryDeps({ kv, limiter, queue: briefQueue });
   const playbooks = {
     store: new MemoryPlaybookStore(),
@@ -223,6 +234,68 @@ describe("POST /v1/playbooks", () => {
     expect(third.statusCode).toBe(429);
     expect(third.json().error.code).toBe("RATE_LIMITED");
     expect(third.headers["retry-after"]).toBeDefined();
+  });
+
+  it("limits playbooks per org per day, across users", async () => {
+    const h = (current = setup({ orgPlaybooksPerDay: 2 }));
+    expect((await h.create({ source: { channel: "@mockgolden01" } })).statusCode).toBe(202);
+    expect((await h.create({ source: { channel: "@mockgolden02" } }, OTHER)).statusCode).toBe(202);
+    const third = await h.create(
+      { source: { channel: "@mockgolden03" } },
+      { ...AUTH, "x-dev-user-id": "a-third-user" },
+    );
+    expect(third.statusCode).toBe(429);
+    expect(third.json().error.code).toBe("RATE_LIMITED");
+  });
+
+  it("at the limit, a channel that isn't cached is refused without a YouTube call", async () => {
+    const inner = new MockChannelLookup();
+    const resolve = vi.spyOn(inner, "resolve");
+    const channels = new CachedChannelLookup(inner, new MemoryKV());
+    const h = (current = setup({ playbooksPerDay: 1, channels }));
+    await h.finished({ source: { channel: "@mockgolden01" } });
+    const live = resolve.mock.calls.length;
+    // A repeat still works: its channel is cached.
+    expect((await h.create({ source: { channel: "@mockgolden01" } })).statusCode).toBe(200);
+    const fresh = await h.create({ source: { channel: "@mocknotcached" } });
+    expect(fresh.statusCode).toBe(429);
+    expect(fresh.json().error.code).toBe("RATE_LIMITED");
+    expect(resolve.mock.calls.length).toBe(live);
+  });
+
+  it("force_refresh doesn't make the API refetch the channel; the worker does", async () => {
+    const channels = new MockChannelLookup();
+    const resolve = vi.spyOn(channels, "resolve");
+    const h = (current = setup({ channels, autoRun: false }));
+    await h.create({ source: { channel: "@mockgolden01" }, force_refresh: true });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect((resolve.mock.calls[0] as unknown[])[1]).not.toMatchObject({ refresh: true });
+  });
+
+  it("a finished playbook releases its in-flight key; a cancel releases only its own", async () => {
+    const h = (current = setup({ autoRun: false }));
+    const first = (await h.create({ source: { channel: "@mockgolden01" } })).json();
+    const key = playbookInflightKey("dev-user", first.channel.id, {
+      windowDays: 90,
+      maxVideos: 50,
+      outlierThreshold: 2,
+    });
+    expect(await h.kv.get(key)).toBe(first.id);
+    await h.drain();
+    // Done: a double click after this starts from a clean slate.
+    expect(await h.kv.get(key)).toBeNull();
+
+    const older = (
+      await h.create({ source: { channel: "@mockgolden01" }, force_refresh: true })
+    ).json();
+    const newer = (
+      await h.create({ source: { channel: "@mockgolden01" }, force_refresh: true })
+    ).json();
+    expect(await h.kv.get(key)).toBe(newer.id);
+    expect((await h.inject("DELETE", `/v1/playbooks/${older.id}`)).statusCode).toBe(204);
+    expect(await h.kv.get(key)).toBe(newer.id);
+    expect((await h.inject("DELETE", `/v1/playbooks/${newer.id}`)).statusCode).toBe(204);
+    expect(await h.kv.get(key)).toBeNull();
   });
 
   it("a playbook that fails for an upstream reason gives the slot back", async () => {

@@ -88,7 +88,8 @@ const ts = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 const secondsOf = (mmss: string) => {
   const [m, s] = mmss.split(":").map(Number);
-  return (m ?? 0) * 60 + (s ?? 0);
+  const total = (m ?? 0) * 60 + (s ?? 0);
+  return Number.isFinite(total) && total >= 0 ? Math.floor(total) : 0;
 };
 
 export function PlaybookPage() {
@@ -107,6 +108,9 @@ export function PlaybookPage() {
   const [skillError, setSkillError] = useState<UiError | null>(null);
   const reported = useRef<string | null>(null);
   const idemKey = useRef(newIdempotencyKey());
+  /** What the current idempotency key was last sent for: a different request gets a new key. */
+  const idemFor = useRef<string | null>(null);
+  const channelInput = useRef<HTMLInputElement>(null);
   const submitted = useRef(false);
   const playerRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +179,13 @@ export function PlaybookPage() {
     setSkillError(null);
     setSkillName("");
     setPlayer(null);
+    // A retry of the same request keeps its key (a lost response returns the same playbook);
+    // a different channel or window must never be answered with the earlier playbook.
+    const what = JSON.stringify([req.channel, req.days]);
+    if (idemFor.current !== null && idemFor.current !== what) {
+      idemKey.current = newIdempotencyKey();
+    }
+    idemFor.current = what;
     try {
       const { status, playbook: p } = await createPlaybook(
         { source: { channel: req.channel }, window_days: req.days },
@@ -189,7 +200,10 @@ export function PlaybookPage() {
       setWatchId(status === 200 ? null : p.id);
     } catch (e) {
       const f = e instanceof ApiFailure ? e : new ApiFailure("INTERNAL", 0);
-      setError(uiError(f.code, f.retryAfterSeconds));
+      const ui = uiError(f.code, f.retryAfterSeconds);
+      setError(ui);
+      // Fix-the-input errors put the cursor back in the channel field.
+      if (ui.action === "focusLink") requestAnimationFrame(() => channelInput.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -280,6 +294,7 @@ export function PlaybookPage() {
                 {P.channelLabel}
               </label>
               <input
+                ref={channelInput}
                 id="pb-channel"
                 className={css.input}
                 placeholder={P.channelPlaceholder}

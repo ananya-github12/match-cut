@@ -2,7 +2,14 @@
  * PRD "Error, warning and empty-state copy": every code maps to one plain message and one action.
  * Messages always come from the PRD table in @match-cut/core/errors, never from server text.
  */
-import { ERRORS, WARNINGS, type ErrorCode, type WarningCode } from "@match-cut/core/errors";
+import {
+  APPLY_WARNINGS,
+  ERRORS,
+  WARNINGS,
+  type ErrorCode,
+  type WarningCode,
+} from "@match-cut/core/errors";
+import { SKILLS_PER_USER } from "@match-cut/core/playbooks/api";
 import { formatTimecode } from "@match-cut/core/timecode";
 import { S } from "./strings";
 
@@ -42,6 +49,8 @@ const ACTIONS: Record<string, ErrorAction> = {
   NOT_ENOUGH_DATA: "tryAnother",
   YOUTUBE_NOT_CONNECTED: "tryAnother",
   PLAYBOOK_NOT_FOUND: "tryAnother",
+  PLAYBOOK_NOT_READY: "retry",
+  BRIEF_NOT_READY: "retry",
   PLAYBOOK_NOT_AVAILABLE: "tryAnother",
   PLAYBOOK_HAS_NO_RULES: "tryAnother",
   SKILL_NOT_FOUND: "tryAnother",
@@ -79,8 +88,13 @@ export function uiError(code: string, retryAfterSeconds?: number): UiError {
     message = message.replace("{minutes}", String(minutes));
   }
   // PRD-playbooks.md: 50 skills per user.
-  message = message.replace("{limit}", "50");
+  message = message.replace("{limit}", String(SKILLS_PER_USER));
   return { code: known, message, action: ACTIONS[known] ?? "retry", retryAfterSeconds };
+}
+
+/** A warning on an apply result: apply's own wording where v1's doesn't fit. */
+export function applyWarningText(code: string): string | null {
+  return (APPLY_WARNINGS as Record<string, string>)[code] ?? warningText(code);
 }
 
 export function warningText(code: string, vars: { duration?: number } = {}): string | null {

@@ -233,6 +233,24 @@ export function storeContract(
       await playbooks.delete(rec.id);
     });
 
+    it("lists running playbooks not updated since a time, oldest first", async () => {
+      const { playbooks } = make();
+      // Far in the past, so rows from other tests never fall before the cutoff.
+      const at = (d: number) => new Date(Date.UTC(2001, 0, d));
+      const recs = [
+        playbookRecord({ status: "processing", updatedAt: at(3) }),
+        playbookRecord({ status: "queued", updatedAt: at(1) }),
+        playbookRecord({ status: "succeeded", updatedAt: at(1) }),
+        playbookRecord({ status: "failed", updatedAt: at(1) }),
+        playbookRecord({ status: "processing", updatedAt: at(20) }),
+      ];
+      for (const r of recs) await playbooks.create(r);
+      const ids = (await playbooks.listStale(at(10), 50)).map((r) => r.id);
+      expect(ids).toEqual([recs[1]!.id, recs[0]!.id]);
+      expect((await playbooks.listStale(at(10), 1)).map((r) => r.id)).toEqual([recs[1]!.id]);
+      for (const r of recs) await playbooks.delete(r.id);
+    });
+
     it("finds the user's recent succeeded playbook for a channel and settings", async () => {
       const { playbooks } = make();
       const user = `user_recent_${++n}`;

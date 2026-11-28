@@ -172,6 +172,24 @@ describe("readResponse", () => {
     expect(code(() => readResponse(resp({ candidates: [] } as never)))).toBe("UPSTREAM_ERROR");
     expect(code(() => readResponse(resp({ text: "  " })))).toBe("UPSTREAM_ERROR");
   });
+  it("refused responses still carry the tokens they were billed for", () => {
+    for (const r of [
+      resp({ finishReason: "SAFETY" }),
+      resp({ finishReason: "RECITATION" }),
+      resp({ text: "  " }),
+    ]) {
+      try {
+        readResponse(r);
+        expect.unreachable();
+      } catch (e) {
+        // Thinking tokens are billed as output.
+        expect((e as MatchCutError).detail?.attemptTokens).toEqual({
+          inputTokens: 10,
+          outputTokens: 8,
+        });
+      }
+    }
+  });
 });
 
 describe("GeminiAnalyzer", () => {

@@ -3,6 +3,8 @@
  * M10.9 and listed in the PRD for sign-off. Error and warning messages come from
  * @match-cut/core/errors, never from server text.
  */
+import { NOT_ENOUGH_DATA_REASON_COPY } from "@match-cut/core/playbooks/api";
+
 export const P = {
   pageTitle: "Channel playbook",
   intro:
@@ -74,12 +76,7 @@ export const P = {
   notExplainedTitle: "What the edit doesn't explain",
 
   notEnoughTitle: "Not enough recent Shorts to compare",
-  reasons: {
-    TOO_FEW_SHORTS: "Too few recent Shorts",
-    TOO_FEW_BREAKOUTS: "Too few breakouts",
-    TOO_FEW_TYPICAL: "Too few typical Shorts",
-    NO_VIEWS: "No view counts",
-  } as Record<string, string>,
+  reasons: NOT_ENOUGH_DATA_REASON_COPY,
   found: (n: number, min: number, what: string) => `${what}: ${n} found, ${min} needed`,
   foundShorts: (days: number) => `Shorts at least ${days} days old`,
   foundBreakouts: "Breakouts",
@@ -119,6 +116,8 @@ export const P = {
   skillsEmpty: "No skills yet. Build a playbook and save it as a skill to reuse it here.",
   loadingSkills: "Loading skills…",
   skillAge: (iso: string) => `Rules from ${day(iso)}`,
+  skillDetailsUnavailable:
+    "We couldn't load when these rules were made or their caveats. Apply still works.",
   applySkillAria: (name: string) => `Apply ${name}`,
   deleteSkillAria: (name: string) => `Delete ${name}`,
   skillFrom: (type: string, title: string | null) =>

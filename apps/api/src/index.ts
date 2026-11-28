@@ -74,6 +74,7 @@ const limiter = new RateLimiter(
     regeneratePerHour: env.RATE_REGENERATE_PER_HOUR,
     orgPerDay: env.RATE_ORG_PER_DAY,
     playbooksPerDay: env.RATE_PLAYBOOKS_PER_DAY,
+    orgPlaybooksPerDay: env.RATE_ORG_PLAYBOOKS_PER_DAY,
   }),
 );
 const spend = new SpendTracker(kv, { capUsd: env.DAILY_SPEND_CAP_USD });

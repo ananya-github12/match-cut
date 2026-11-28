@@ -9,6 +9,7 @@ import {
   modelNames,
   parseEnv,
   PLAYBOOK_STAGES,
+  playbookInflightKey,
   type ChannelRef,
   type PlaybookStage,
 } from "@match-cut/core";
@@ -26,7 +27,12 @@ import {
   type ChannelLookup,
   type MockAnalyzerOptions,
 } from "@match-cut/providers";
-import { runPlaybookJob, type PlaybookPipelineDeps } from "@match-cut/worker/playbook-pipeline";
+import {
+  failDeadPlaybook,
+  failStalePlaybooks,
+  runPlaybookJob,
+  type PlaybookPipelineDeps,
+} from "@match-cut/worker/playbook-pipeline";
 import { describe, expect, it, vi } from "vitest";
 
 const NOW = new Date("2026-11-24T12:00:00Z").getTime();
@@ -47,7 +53,7 @@ function setup(
   const events = new MemoryBriefEvents();
   const analyzer = new MockAnalyzer({ faults: opts.faults });
   const logs: { msg: string; extra?: Record<string, unknown> }[] = [];
-  const spend = { add: vi.fn(async () => {}) };
+  const spend = { add: vi.fn(async () => {}), overCap: vi.fn(async () => false) };
   const deps: PlaybookPipelineDeps = {
     store,
     kv,
@@ -499,5 +505,92 @@ describe("playbook job: review fixes (M10.6)", () => {
     expect(pb.meta.repairUsed).toBe(true);
     // 9 good watches at 18,000 input tokens each, plus the failed watch and its repair.
     expect(pb.meta.tokens.pass1_input).toBe(9 * 18_000 + 1234 + 100);
+  });
+});
+
+describe("playbook job: M10 review fixes (cost and stuck jobs)", () => {
+  it("too few analyzable videos fails without a refund: paid watches can't be retried for free", async () => {
+    const refund = vi.fn(async () => {});
+    const blocked = Array.from({ length: 10 }, () => ({ finishReason: "SAFETY" }));
+    const s = setup({ faults: { watch: blocked }, deps: { refund } });
+    const pb = await run(s, "mockgolden01");
+    expect(pb.error!.code).toBe("INVALID_MODEL_OUTPUT");
+    expect(refund).not.toHaveBeenCalled();
+  });
+
+  it("Gemini refusing every video with a 4xx is a configuration fault: refunded, with an alert", async () => {
+    const refund = vi.fn(async () => {});
+    const refused = Array.from({ length: 10 }, () => ({ status: 400 }));
+    const s = setup({ faults: { watch: refused }, deps: { refund } });
+    const pb = await run(s, "mockgolden01");
+    expect(pb.error!.code).toBe("UPSTREAM_ERROR");
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(s.logs.some((l) => l.msg.startsWith("ALERT: Gemini refused every video"))).toBe(true);
+  });
+
+  it("a 4xx while extracting features fails the playbook instead of skipping the video", async () => {
+    const s = setup({ faults: { extractFeatures: [{ status: 400 }] } });
+    const pb = await run(s, "mockgolden06");
+    expect(pb).toMatchObject({ status: "failed", error: { code: "UPSTREAM_ERROR" } });
+  });
+
+  it("the daily spend cap stops a running playbook before its next paid call", async () => {
+    const refund = vi.fn(async () => {});
+    const s = setup({ deps: { refund } });
+    s.spend.overCap.mockResolvedValueOnce(false).mockResolvedValue(true);
+    const pb = await run(s, "mockgolden01");
+    expect(pb.error!.code).toBe("CAPACITY_EXHAUSTED");
+    expect(calls(s, "watch")).toBeLessThan(4);
+    expect(refund).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the in-flight key when the job ends, only if it names this playbook", async () => {
+    const s = setup();
+    const found = await new MockChannelLookup({ now: () => new Date(NOW) }).resolve({
+      kind: "handle",
+      handle: "mockgolden01",
+    });
+    const channelId = found.status === "found" ? found.channel.id : "";
+    const key = playbookInflightKey("user_1", channelId, {
+      windowDays: 90,
+      maxVideos: 50,
+      outlierThreshold: 2,
+    });
+    await s.kv.set(key, `pb_${n + 1}`, 600);
+    await run(s, "mockgolden01");
+    expect(await s.kv.get(key)).toBeNull();
+    await s.kv.set(key, "pb_someone_newer", 600);
+    await run(s, "mockgolden01", { forceRefresh: true });
+    expect(await s.kv.get(key)).toBe("pb_someone_newer");
+  });
+
+  it("a job that died is failed as INTERNAL, refunded and alerted; finished ones are left alone", async () => {
+    const s = setup();
+    const refund = vi.fn(async () => {});
+    const old = new Date(NOW - 60 * 60_000);
+    const stuck = newPlaybook(
+      { kind: "handle", handle: "mockgolden01" },
+      { status: "processing", stage: "watching", updatedAt: old },
+    );
+    const done = newPlaybook(
+      { kind: "handle", handle: "mockgolden01" },
+      { status: "succeeded", updatedAt: old },
+    );
+    const recent = newPlaybook({ kind: "handle", handle: "mockgolden01" }, { status: "queued" });
+    for (const r of [stuck, done, recent]) await s.store.create(r);
+    const d = { store: s.store, kv: s.kv, events: s.events, refund, log: s.deps.log };
+    expect(await failStalePlaybooks({ ...d, staleAfterMs: 20 * 60_000, now: () => NOW })).toBe(1);
+    expect(await s.store.get(stuck.id)).toMatchObject({
+      status: "failed",
+      stage: null,
+      error: { code: "INTERNAL" },
+    });
+    expect((await s.store.get(done.id))!.status).toBe("succeeded");
+    expect((await s.store.get(recent.id))!.status).toBe("queued");
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(s.logs.some((l) => l.msg.startsWith("ALERT: a playbook job died"))).toBe(true);
+    // The worker's "failed" handler: already finished means nothing to do.
+    expect(await failDeadPlaybook(d, stuck.id, "job_failed")).toBe(false);
+    expect(await failDeadPlaybook(d, recent.id, "job_failed")).toBe(true);
   });
 });

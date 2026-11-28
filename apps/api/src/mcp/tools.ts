@@ -16,7 +16,9 @@ import {
   applySource,
   applyVia,
   exactlyOne,
+  plainThirdParty,
   registerPlaybookTools,
+  thirdParty,
   type PlaybooksApi,
 } from "./playbook-tools.js";
 
@@ -141,8 +143,8 @@ export function toOutput(b: BriefResponse): BriefOutput {
     video: b.video
       ? {
           id: b.video.id,
-          title: b.video.title,
-          channel: b.video.channel,
+          title: b.video.title === null ? null : plainThirdParty(b.video.title),
+          channel: b.video.channel === null ? null : plainThirdParty(b.video.channel),
           duration_seconds: b.video.duration_seconds,
         }
       : null,
@@ -164,8 +166,8 @@ function mmss(seconds: number | null): string {
 
 /** Short, readable text for assistants that only show text; the same data is in structuredContent. */
 export function toText(o: BriefOutput): string {
-  const title = o.video?.title ? `"${o.video.title}"` : "the reference";
-  const who = o.video?.channel ? ` by ${o.video.channel}` : "";
+  const title = o.video?.title ? thirdParty(o.video.title) : "the reference";
+  const who = o.video?.channel ? ` by ${thirdParty(o.video.channel)}` : "";
   const head = `${title}${who} (${mmss(o.video?.duration_seconds ?? null)}), brief_id ${o.brief_id}`;
   const lines: string[] = [];
   if (o.status === "succeeded" && o.cardboard_prompt) {
@@ -209,7 +211,7 @@ export function shotListText(o: ShotListOutput, title: string | null): string {
   if (o.shot_list.length) {
     const total = o.total_seconds === null ? "" : `, about ${seconds(o.total_seconds)}`;
     lines.push(
-      `Shot list for ${title ? `"${title}"` : `this ${o.source.type}`} (${o.shot_list.length} shots${total}):`,
+      `Shot list for ${title ? thirdParty(title) : `this ${o.source.type}`} (${o.shot_list.length} shots${total}):`,
     );
     o.shot_list.forEach((s, i) => {
       const tip = s.notes ? ` Tip: ${s.notes}` : "";

@@ -57,6 +57,33 @@ export function featuresCacheKey(pass1Key: string, p: { model: string; version: 
 }
 
 /**
+ * The running playbook for one user, channel and settings, so a double click starts one job.
+ * Set by the API when it starts the job; released by the worker when the job ends.
+ */
+export function playbookInflightKey(
+  userId: string,
+  channelId: string,
+  s: { windowDays: number; maxVideos: number; outlierThreshold: number },
+): string {
+  return `pbinflight:${userId}:${channelId}:${s.windowDays}:${s.maxVideos}:${s.outlierThreshold}`;
+}
+
+/** Releases a playbook's in-flight key, only while it still names that playbook. */
+export async function releasePlaybookInflight(
+  kv: { get(key: string): Promise<string | null>; del(key: string): Promise<void> },
+  pb: {
+    id: string;
+    userId: string;
+    channel: { id: string } | null;
+    settings: { windowDays: number; maxVideos: number; outlierThreshold: number };
+  },
+): Promise<void> {
+  if (!pb.channel) return;
+  const key = playbookInflightKey(pb.userId, pb.channel.id, pb.settings);
+  if ((await kv.get(key)) === pb.id) await kv.del(key);
+}
+
+/**
  * A finished playbook for a channel and settings, shared across users for 24 hours: the channel
  * stats key's parts plus the threshold, every version behind the result, and the models.
  */

@@ -221,26 +221,38 @@ export function buildPass2Request(
   };
 }
 
-/** Turns a response into text + parsed JSON, or throws the matching error code. */
+/**
+ * Turns a response into text + parsed JSON, or throws the matching error code. A response that
+ * was generated and then refused (blocked, recitation, out of tokens, empty) is still billed: its
+ * errors carry `attemptTokens`, which withFallback adds to what the call reports.
+ */
 export function readResponse(res: GenerateContentResponse): { text: string; output: unknown } {
+  const attemptTokens = usageOf(res);
   const blockReason = res.promptFeedback?.blockReason;
-  if (blockReason) throw new MatchCutError("CONTENT_BLOCKED", {}, { blockReason });
+  if (blockReason) throw new MatchCutError("CONTENT_BLOCKED", {}, { blockReason, attemptTokens });
   const candidate = res.candidates?.[0];
-  if (!candidate) throw new MatchCutError("UPSTREAM_ERROR", {}, { reason: "no_candidates" });
+  if (!candidate) {
+    throw new MatchCutError("UPSTREAM_ERROR", {}, { reason: "no_candidates", attemptTokens });
+  }
   const finish = candidate.finishReason as string | undefined;
   if (finish && BLOCKED_FINISH.has(finish)) {
-    throw new MatchCutError("CONTENT_BLOCKED", {}, { finishReason: finish });
+    throw new MatchCutError("CONTENT_BLOCKED", {}, { finishReason: finish, attemptTokens });
   }
   if (finish === "RECITATION" || finish === "MAX_TOKENS") {
-    throw new MatchCutError("INVALID_MODEL_OUTPUT", {}, { finishReason: finish });
+    throw new MatchCutError("INVALID_MODEL_OUTPUT", {}, { finishReason: finish, attemptTokens });
   }
   const text = (candidate.content?.parts ?? [])
     .filter((p) => typeof p.text === "string" && !p.thought)
     .map((p) => p.text)
     .join("")
     .trim();
-  if (!text)
-    throw new MatchCutError("UPSTREAM_ERROR", {}, { reason: "empty_text", finishReason: finish });
+  if (!text) {
+    throw new MatchCutError(
+      "UPSTREAM_ERROR",
+      {},
+      { reason: "empty_text", finishReason: finish, attemptTokens },
+    );
+  }
   const unfenced = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   let output: unknown;
   try {

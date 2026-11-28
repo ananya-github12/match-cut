@@ -281,6 +281,11 @@ export interface PlaybookStore {
   }): Promise<PlaybookRecord | null>;
   /** Playbooks the user started at or after `since` (PRD limit: 5 a day). */
   countByUserSince(userId: string, since: Date): Promise<number>;
+  /**
+   * Queued or processing playbooks not updated since `before`: their job died without recording
+   * why (stalled twice, lost from the queue, a failed write). Oldest first, at most `limit`.
+   */
+  listStale(before: Date, limit: number): Promise<PlaybookRecord[]>;
 }
 
 // ---------- Skills (PRD-playbooks.md, Feature 4) ----------

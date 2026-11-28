@@ -62,6 +62,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml rm -sf api worke
    | `GEMINI_MODEL_STANDARD`, `GEMINI_MODEL_DEEP`, `GEMINI_MODEL_FALLBACK` | see `.env.example` |
    | `DAILY_SPEND_CAP_USD` | start low, e.g. `2` |
    | `RATE_PLAYBOOKS_PER_DAY` | playbooks per visitor per day (default `5`) |
+   | `RATE_ORG_PLAYBOOKS_PER_DAY` | playbooks per day for all visitors together (default `50`); for a public demo, e.g. `10` |
    | `RATE_ORG_PER_DAY` | for a public demo, e.g. `200` (all visitors share one org) |
    | `WEB_ORIGIN` | your Vercel URL |
    | `MCP_API_KEYS` | optional: keys for the MCP server at `/mcp` (`openssl rand -hex 24`); empty turns it off |

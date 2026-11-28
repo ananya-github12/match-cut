@@ -357,10 +357,13 @@ Pipeline notes (M10.6):
   - `force_refresh` refetches stats and skips the feature and playbook caches; the pass 1 cache still applies.
   - Results that used a fallback model, fallback wording or a skipped video are not cached.
 - **Failures, per video or passing**:
-  - A problem with one video doesn't sink the playbook. That means invalid output after the repair, blocked content, a video state, or a 4xx from Gemini meaning it can't access the video. The video is left out, the playbook gets `VIDEOS_SKIPPED`, and the video's `compared` is false.
+  - A problem with one video doesn't sink the playbook. That means invalid output after the repair, blocked content, a video state, or a 4xx from Gemini while watching, meaning it can't access the video. The video is left out, the playbook gets `VIDEOS_SKIPPED`, and the video's `compared` is false.
+  - A 4xx from Gemini in the text-only extraction step, or on every video watched, is a configuration fault (key, model name), not a video problem: the playbook fails with `UPSTREAM_ERROR` and an ALERT log line (added in M10.11).
   - A passing problem fails the playbook at once as retryable (an overload or timeout after the retries and fallbacks, or the YouTube API). The calls still running are stopped. A retry is cheap: finished videos come back from the caches.
   - If skipped videos leave fewer than 3 breakouts or 3 typical videos, the playbook fails with `INVALID_MODEL_OUTPUT`.
-  - Failures that aren't the user's give back their rate-limit slot, as in v1: `UPSTREAM_*`, `CAPACITY_EXHAUSTED`, `INVALID_MODEL_OUTPUT` and `INTERNAL`.
+  - Failures that aren't the user's give back their rate-limit slot, as in v1: `UPSTREAM_*`, `CAPACITY_EXHAUSTED` and `INTERNAL`. Not `INVALID_MODEL_OUTPUT` (changed in M10.11): for a playbook it means too few of the channel's videos could be analyzed after paid watches, and refunding it would let the same channel be retried for free. Apply doesn't refund it either.
+  - The daily spend cap is checked before every paid watch and extraction, not only when the playbook starts, so jobs already running stop at the cap with `CAPACITY_EXHAUSTED` (refunded). Calls Gemini refused after generating (blocked, recitation, out of tokens) count toward spend.
+  - A job that dies without recording why (stalled twice, lost from the queue, a failed write) is failed as `INTERNAL`, refunded and logged as an ALERT: by the worker when the queue gives the job up, and by a sweep every 5 minutes for playbooks still running past their time limit plus queue wait.
 - **`videos[].compared`** (added in M10.6) is true for the picked videos that are in the comparison, so the app highlights only the breakouts the evidence counts.
 - **Stored (internal) meta** also records how many videos were skipped, whether the writer failed and whether a fallback model was used. So a degraded playbook isn't served as the 24-hour repeat.
 - **Writer outage**: the playbook still succeeds. Its rules are computed, the wording is the fallback copy, there's no recipe, and it carries `RECIPE_UNAVAILABLE`. `partial` isn't used, because nothing the user asked for is missing except the recipe, which the warning explains.
@@ -459,7 +462,7 @@ All under `/v1`, same auth, JSON and idempotency rules as v1.
 | Code | HTTP | Retryable | Meaning |
 | --- | --- | --- | --- |
 | `CHANNEL_NOT_FOUND` | 404 | No | No channel for that handle, URL or video |
-| `NOT_ENOUGH_DATA` | 422 | No | Fewer than 10 eligible Shorts or fewer than 2 outliers in the window |
+| `NOT_ENOUGH_DATA` | 422 | No | Fewer than 10 eligible Shorts, 3 outliers or 3 typical videos in the window (see Scoring, step 7; changed from "2 outliers") |
 | `YOUTUBE_NOT_CONNECTED` | 403 | No | `source.mine` without a connected channel |
 | `YOUTUBE_ACCESS_REVOKED` | 403 | No | The user revoked access; reconnect |
 
@@ -591,7 +594,7 @@ Frontend notes (M10.9, for sign-off):
 | Features | Pass 1 key plus feature schema version | 30 days |
 | Playbook | Channel stats key plus outlier threshold plus feature, comparison and writing versions | 24 h |
 
-Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook, playbook spend counted against the daily cap, at most 3 concurrent pass 1 calls per playbook. Store YouTube statistics no longer than the YouTube API policies allow (verify the current retention limit; 30 days is the working assumption).
+Limits (proposed): 5 playbooks per user per day, 10 videos watched per playbook, playbook spend counted against the daily cap, at most 3 concurrent pass 1 calls per playbook. Added in M10.11, for sign-off: 50 playbooks per org per day (`RATE_ORG_PLAYBOOKS_PER_DAY`), because a new user ID resets the per-user limit. A user at the limit gets repeats and attaches from the channel cache; a channel that isn't cached is refused without a YouTube call. Store YouTube statistics no longer than the YouTube API policies allow (verify the current retention limit; 30 days is the working assumption).
 
 ## Quality evaluation
 
@@ -630,7 +633,10 @@ M10 was built in mock mode, with decisions the PRD left open recorded next to th
 - [ ] **Storage and pipeline** (Feature 3, M10.5 and M10.6 notes): what's stored, 30-day retention, caches, per-video skips, writer outage still succeeding with `RECIPE_UNAVAILABLE`, refunds.
 - [ ] **Skills** (Feature 4, M10.5 notes and the drafted skill object): snapshot contents, evidence counts kept, speech fingerprints, encrypted names, 50 per user.
 - [ ] **API** (API additions): error codes added in M10.7 and their copy, behavior notes, and the playbook warning copy.
-- [ ] **Frontend** (Frontend additions, M10.9 notes): every string in `apps/web/lib/playbook-strings.ts`.
+- [ ] **Frontend** (Frontend additions, M10.9 notes): every string in `apps/web/lib/playbook-strings.ts`, including the not-enough-data reasons shared with MCP (`NOT_ENOUGH_DATA_REASON_COPY`), and the page titles.
+- [ ] **Assistant-facing copy** (MCP tools): `MCP_PLAYBOOK_INSTRUCTIONS`, each tool's description and `next_step`, and the cancelled, unfinished and retry sentences in `apps/api/src/mcp/playbook-tools.ts`.
+- [ ] **Apply's shot-list warning** (`APPLY_WARNINGS` in `packages/core/src/errors.ts`): "We couldn't build a shot list this time. Write the prompt again to get one." v1's wording says "Regenerate", which apply doesn't have.
+- [ ] **Review changes from M10.11** (Storage and pipeline notes, Cost, limits and caching): no refund for `INVALID_MODEL_OUTPUT`, the spend cap inside running jobs, dead-job handling, the org-wide playbook limit, and 4xx errors as configuration faults.
 - [ ] **Evaluation** (Quality evaluation, M10.10 notes): mock golden channels with planted patterns stand in for real ones until real channels are picked and their notes written.
 
 ## Open questions

@@ -8,6 +8,7 @@
  */
 import {
   GOAL_MAX_CHARS,
+  NOT_ENOUGH_DATA_REASON_COPY,
   PLAYBOOK_COPY,
   TARGET_FORMATS,
   TERMINAL_STATUSES,
@@ -175,13 +176,17 @@ export function toPlaybookOutput(p: PlaybookResponse): PlaybookOutput {
     status: p.status,
     stage: p.stage,
     progress: p.progress,
-    channel: p.channel && { id: p.channel.id, title: p.channel.title, handle: p.channel.handle },
+    channel: p.channel && {
+      id: p.channel.id,
+      title: plainThirdParty(p.channel.title),
+      handle: p.channel.handle,
+    },
     shorts_compared: p.status === "succeeded" ? p.videos.filter((v) => v.compared).length : null,
     breakouts: p.videos
       .filter((v) => v.group === "outlier" && v.compared)
       .map((v) => ({
         video_id: v.id,
-        title: v.title,
+        title: plainThirdParty(v.title),
         views: v.views,
         outlier_score: v.outlier_score,
       })),
@@ -205,17 +210,24 @@ export function toPlaybookOutput(p: PlaybookResponse): PlaybookOutput {
 const at = (ts: string) => ts.replace(/^0(\d:)/, "$1");
 
 /**
- * Owner-written text (channel and video titles, skill names) shown to an assistant: control
- * characters and line breaks removed, capped and quoted, so it reads as data, not instructions.
+ * Owner-written text (channel and video titles, skill names) for an assistant: control
+ * characters and line breaks removed, and capped. Used as is in structuredContent, which most
+ * clients also hand to the model.
  */
-export function thirdParty(text: string, max = 100): string {
+export function plainThirdParty(text: string, max = 100): string {
   const clean = text
     .replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const capped = [...clean].length > max ? `${[...clean].slice(0, max - 1).join("")}…` : clean;
-  return JSON.stringify(capped);
+  return [...clean].length > max ? `${[...clean].slice(0, max - 1).join("")}…` : clean;
 }
+
+/** The same, quoted for text output, so it reads as data, not instructions. */
+export const thirdParty = (text: string, max = 100): string =>
+  JSON.stringify(plainThirdParty(text, max));
+
+const plainOrNull = (text: string | null, max?: number) =>
+  text === null ? null : plainThirdParty(text, max);
 
 const views = (n: number) => n.toLocaleString("en-US");
 
@@ -271,12 +283,13 @@ export function playbookText(o: PlaybookOutput): string {
   return lines.join("\n");
 }
 
-const REASONS: Record<string, string> = {
-  TOO_FEW_SHORTS: "too few recent Shorts",
-  TOO_FEW_BREAKOUTS: "too few breakouts",
-  TOO_FEW_TYPICAL: "too few typical Shorts",
-  NO_VIEWS: "no view counts",
-};
+/** The web app's words for each reason, lowercased to sit mid-sentence. */
+const REASONS: Record<string, string> = Object.fromEntries(
+  Object.entries(NOT_ENOUGH_DATA_REASON_COPY).map(([k, v]) => [
+    k,
+    v[0]!.toLowerCase() + v.slice(1),
+  ]),
+);
 
 function playbookResult(p: PlaybookResponse) {
   if (p.status === "failed" || p.status === "cancelled") {
@@ -382,8 +395,8 @@ export const exactlyOne = (what: string) => ({
 
 const toSkillOut = (s: SkillSummaryResponse): z.infer<typeof skillOut> => ({
   skill_id: s.id,
-  name: s.name,
-  source: s.source,
+  name: plainThirdParty(s.name, 80),
+  source: { ...s.source, title: plainOrNull(s.source.title) },
   last_used_at: s.last_used_at,
 });
 

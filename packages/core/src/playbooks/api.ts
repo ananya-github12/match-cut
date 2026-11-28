@@ -79,6 +79,14 @@ export type CreatePlaybookRequest = z.infer<typeof createPlaybookRequestSchema>;
 
 /** PRD: "50 skills per user". */
 export const SKILLS_PER_USER = 50;
+
+/** Why there's too little data, in words (drafted in M10.9; needs owner sign-off). */
+export const NOT_ENOUGH_DATA_REASON_COPY: Record<string, string> = {
+  TOO_FEW_SHORTS: "Too few recent Shorts",
+  TOO_FEW_BREAKOUTS: "Too few breakouts",
+  TOO_FEW_TYPICAL: "Too few typical Shorts",
+  NO_VIEWS: "No view counts",
+};
 export const SKILL_NAME_MAX_CHARS = 80;
 
 /**

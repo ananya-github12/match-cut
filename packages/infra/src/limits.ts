@@ -22,6 +22,8 @@ export function defaultRules(c: {
   orgPerDay: number;
   /** PRD-playbooks.md: 5 a day. Omit for no playbook limit. */
   playbooksPerDay?: number;
+  /** Playbooks per org per day. Omit for none. */
+  orgPlaybooksPerDay?: number;
 }): LimitRule[] {
   return [
     {
@@ -48,6 +50,17 @@ export function defaultRules(c: {
             kind: "playbook" as const,
             scope: "user" as const,
             limit: c.playbooksPerDay,
+            windowSeconds: 86400,
+          },
+        ]),
+    ...(c.orgPlaybooksPerDay === undefined
+      ? []
+      : [
+          {
+            name: "org-playbook-day",
+            kind: "playbook" as const,
+            scope: "org" as const,
+            limit: c.orgPlaybooksPerDay,
             windowSeconds: 86400,
           },
         ]),
@@ -83,6 +96,23 @@ export class RateLimiter {
       taken.push({ key, ttl: rule.windowSeconds });
       if (count > rule.limit) {
         for (const t of taken) await this.kv.incrBy(t.key, -1, t.ttl);
+        const windowEnd = (Math.floor(at / 1000 / rule.windowSeconds) + 1) * rule.windowSeconds;
+        return {
+          ok: false,
+          retryAfterSeconds: Math.max(1, Math.ceil(windowEnd - at / 1000)),
+          rule: rule.name,
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  /** Whether `take` would refuse right now, without counting anything. */
+  async full(kind: LimitKind, who: Who): Promise<LimitResult> {
+    const at = this.now();
+    for (const rule of this.rules.filter((r) => r.kind === kind)) {
+      const count = Number((await this.kv.get(this.key(rule, who, at))) ?? 0);
+      if (count >= rule.limit) {
         const windowEnd = (Math.floor(at / 1000 / rule.windowSeconds) + 1) * rule.windowSeconds;
         return {
           ok: false,

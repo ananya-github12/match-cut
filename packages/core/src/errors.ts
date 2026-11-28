@@ -173,6 +173,21 @@ export const WARNINGS = {
 
 export type WarningCode = keyof typeof WARNINGS;
 
+/**
+ * Apply's wording where v1's doesn't fit (drafted in M10; needs owner sign-off): apply has no
+ * "Regenerate" action and isn't about one video.
+ */
+export const APPLY_WARNINGS = {
+  SHOT_LIST_UNAVAILABLE:
+    "We couldn't build a shot list this time. Write the prompt again to get one.",
+} as const satisfies Partial<Record<WarningCode, string>>;
+
+/** A warning on an apply result: apply's wording when it has its own. */
+export function applyWarning(code: WarningCode): Warning {
+  const own = (APPLY_WARNINGS as Partial<Record<WarningCode, string>>)[code];
+  return own ? { code, message: own } : warning(code);
+}
+
 /** Playbook warnings (PRD-playbooks.md, playbook object `warnings[]`). */
 export const PLAYBOOK_WARNINGS = {
   SMALL_SAMPLE: "Only a few videos could be compared, so treat these patterns as early signals.",

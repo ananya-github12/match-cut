@@ -469,9 +469,12 @@ export async function checkPlaybook(
   } catch (e) {
     // Failed calls still cost tokens.
     const usage = e instanceof MatchCutError ? e.detail?.usage : undefined;
-    if (deps.pricing && usage && typeof usage === "object") {
-      const u = usage as { model: string; tokens: { input: number; output: number } };
-      r.costUsd += costUsd(deps.pricing, u.model, u.tokens);
+    const spent = (Array.isArray(usage) ? usage : usage ? [usage] : []) as {
+      model: string;
+      tokens: { input: number; output: number };
+    }[];
+    for (const u of spent) {
+      if (deps.pricing) r.costUsd += costUsd(deps.pricing, u.model, u.tokens);
     }
     r.checks.apply = false;
     problem("apply", e instanceof Error ? e.message : String(e));

@@ -106,6 +106,18 @@ export class PgPlaybookStore implements PlaybookStore {
       .where(and(eq(playbooks.userId, userId), gte(playbooks.createdAt, since)));
     return row?.n ?? 0;
   }
+
+  async listStale(before: Date, limit: number): Promise<PlaybookRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(playbooks)
+      .where(
+        and(inArray(playbooks.status, ["queued", "processing"]), lt(playbooks.updatedAt, before)),
+      )
+      .orderBy(playbooks.updatedAt)
+      .limit(limit);
+    return rows.map((r) => this.fromRow(r));
+  }
 }
 
 /** Skill names are user-written, so they're encrypted at rest with the goal key. */

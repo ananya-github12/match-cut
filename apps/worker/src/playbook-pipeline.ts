@@ -36,6 +36,7 @@ import {
   PLAYBOOK_TTL_SECONDS,
   PLAYBOOK_VERSION,
   playbookWarning,
+  releasePlaybookInflight,
   SCHEMA_VERSION,
   scoreChannel,
   SMALL_SAMPLE_PICKS,
@@ -120,12 +121,16 @@ class JobEnded extends Error {}
 
 const RUNNING = ["queued", "processing"] as const;
 
-/** Failures that aren't the user's: their rate-limit slot is given back (as v1). */
+/**
+ * Failures that aren't the user's: their rate-limit slot is given back (as v1). Not
+ * INVALID_MODEL_OUTPUT: for a playbook it means too few of the channel's videos could be
+ * analyzed, after paid watches. Refunding it would let one channel be retried for free (as
+ * apply, which doesn't refund it either).
+ */
 const NOT_USERS_FAULT = new Set([
   "UPSTREAM_ERROR",
   "UPSTREAM_TIMEOUT",
   "CAPACITY_EXHAUSTED",
-  "INVALID_MODEL_OUTPUT",
   "INTERNAL",
 ]);
 
@@ -141,16 +146,63 @@ const PER_VIDEO_CODES = new Set([
   "VIDEO_TOO_LONG",
 ]);
 
-export function isPerVideoFailure(e: unknown): boolean {
-  return (
-    e instanceof MatchCutError &&
-    // A 4xx from Gemini (other than quota) means it can't access this video.
-    (PER_VIDEO_CODES.has(e.error.code) || e.detail?.clientError === true)
-  );
+/**
+ * Whether a failed step leaves just that video out. A 4xx from Gemini (other than quota) while
+ * watching means it can't access the video. In the text-only extraction no video is involved, so
+ * a 4xx there is a configuration fault (key, model name) and fails the playbook.
+ */
+export function isPerVideoFailure(
+  e: unknown,
+  step: "watching" | "extracting" = "watching",
+): boolean {
+  if (!(e instanceof MatchCutError)) return false;
+  if (PER_VIDEO_CODES.has(e.error.code)) return true;
+  return step === "watching" && e.detail?.clientError === true;
 }
 
 const asMatchCut = (e: unknown) =>
   e instanceof MatchCutError ? e : new MatchCutError("INTERNAL", {}, { err: String(e) });
+
+export interface DeadPlaybookDeps {
+  store: PlaybookStore;
+  kv: KV;
+  events: BriefEvents;
+  refund?: (pb: PlaybookRecord) => Promise<void>;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}
+
+/**
+ * A playbook whose job died without recording why (stalled twice, lost from the queue, a write
+ * that failed): failed as INTERNAL and its slot given back, so it never waits forever. False if
+ * it had already finished.
+ */
+export async function failDeadPlaybook(
+  d: DeadPlaybookDeps,
+  id: string,
+  reason: string,
+): Promise<boolean> {
+  const failed = await d.store.update(
+    id,
+    { status: "failed", stage: null, progress: null, error: apiError("INTERNAL") },
+    { onlyIfStatus: RUNNING },
+  );
+  if (!failed) return false;
+  d.log?.("ALERT: a playbook job died; marked failed", { playbookId: id, reason });
+  await d.events.publish(id).catch(() => {});
+  await releasePlaybookInflight(d.kv, failed).catch(() => {});
+  await d.refund?.(failed);
+  return true;
+}
+
+/** Sweeps playbooks still running long after any job could have finished them. */
+export async function failStalePlaybooks(
+  d: DeadPlaybookDeps & { staleAfterMs: number; now: () => number },
+): Promise<number> {
+  const stale = await d.store.listStale(new Date(d.now() - d.staleAfterMs), 50);
+  let n = 0;
+  for (const pb of stale) if (await failDeadPlaybook(d, pb.id, "stale")) n++;
+  return n;
+}
 
 /** What the 24-hour playbook cache holds: everything but the request, owner and meta. */
 type CachedPlaybook = Pick<
@@ -339,6 +391,14 @@ export async function runPlaybookJob(
   let repairUsed = false;
   let fallbacksUsed = false;
   let writerFailed = false;
+  /** Videos left out because Gemini answered 4xx while watching. */
+  let clientSkips = 0;
+  /** Before each paid call: the daily spend cap also stops jobs already running. */
+  const checkSpendCap = async () => {
+    if (deps.spend && (await deps.spend.overCap())) {
+      throw new MatchCutError("CAPACITY_EXHAUSTED", {}, { reason: "spend_cap" });
+    }
+  };
 
   /** A video failed. Per-video problems leave it out; anything else fails the whole playbook. */
   const videoFailed = async (step: "watching" | "extracting", videoId: string, e: unknown) => {
@@ -346,10 +406,11 @@ export async function runPlaybookJob(
     // Tokens are counted per model step, as for successful calls.
     await accountFailure(step === "watching" ? "pass1" : "features", e);
     if (e instanceof MatchCutError && e.detail?.repairUsed) repairUsed = true;
-    if (!isPerVideoFailure(e)) {
+    if (!isPerVideoFailure(e, step)) {
       abort(new StepFailed(asMatchCut(e)));
       throw signal.reason;
     }
+    if (e instanceof MatchCutError && e.detail?.clientError === true) clientSkips++;
     log("playbook video skipped", {
       playbookId: pb.id,
       videoId,
@@ -500,6 +561,7 @@ export async function runPlaybookJob(
             fromCache = null;
           }
           if (fromCache) return { video, group, output: fromCache, pass1Key } satisfies Watched;
+          await checkSpendCap();
           const run = await watchAndValidate(
             analyzer,
             {
@@ -554,6 +616,7 @@ export async function runPlaybookJob(
             ungrounded += fromCache.ungrounded;
             return featureRow(fromCache.values, breakdown, w.video.durationSeconds);
           }
+          await checkSpendCap();
           const run = await extractAndGround(
             analyzer,
             { videoId: w.video.id, breakdown, model: models.features },
@@ -586,6 +649,14 @@ export async function runPlaybookJob(
     const typical = usable.filter((u) => u.group === "typical");
     skipped = picked - usable.length;
     if (outliers.length < MIN_OUTLIERS || typical.length < MIN_TYPICAL) {
+      // Every skip a 4xx from Gemini: almost surely the key or a model name, not the videos.
+      if (skipped > 0 && clientSkips === skipped) {
+        log("ALERT: Gemini refused every video in a playbook; check the API key and model names", {
+          playbookId: pb.id,
+          skipped,
+        });
+        throw new MatchCutError("UPSTREAM_ERROR", {}, { reason: "client_errors", skipped });
+      }
       // Only per-video problems get here (passing ones failed the job already).
       throw new MatchCutError("INVALID_MODEL_OUTPUT", {}, { reason: "too_few_analyzed", skipped });
     }
@@ -785,6 +856,11 @@ export async function runPlaybookJob(
     clearTimeout(deadline);
     abort(new JobEnded());
     await unsubscribe?.().catch(() => {});
+    // The job is over: a new request for this channel may start a fresh one.
+    const latest = await store.get(pb.id).catch(() => null);
+    if (latest && isTerminal(latest.status)) {
+      await releasePlaybookInflight(kv, latest).catch(() => {});
+    }
     // One line per job for dashboards. No titles or channel input.
     log("playbook finished", {
       playbookId: pb.id,

@@ -16,6 +16,8 @@ import {
   isTerminal,
   MatchCutError,
   parseChannelSource,
+  playbookInflightKey,
+  releasePlaybookInflight,
   type ChannelRef,
 } from "@match-cut/core";
 import {
@@ -64,15 +66,16 @@ export async function takeSlot(
   const at = new Date();
   if (!limiter) return at;
   const r = await limiter.take(kind, who);
-  if (!r.ok) {
-    throw new MatchCutError(
-      "RATE_LIMITED",
-      { minutes: Math.max(1, Math.ceil(r.retryAfterSeconds / 60)) },
-      { retryAfterSeconds: r.retryAfterSeconds, rule: r.rule },
-    );
-  }
+  if (!r.ok) throw rateLimited(r);
   return at;
 }
+
+const rateLimited = (r: { retryAfterSeconds: number; rule: string }) =>
+  new MatchCutError(
+    "RATE_LIMITED",
+    { minutes: Math.max(1, Math.ceil(r.retryAfterSeconds / 60)) },
+    { retryAfterSeconds: r.retryAfterSeconds, rule: r.rule },
+  );
 
 /** Apply's body: goal length first (GOAL_TOO_LONG), then the shape (INVALID_REQUEST). */
 export function parseApplyBody(body: unknown) {
@@ -123,8 +126,7 @@ export function isDegraded(p: PlaybookRecord): boolean {
   );
 }
 
-const inflightKey = (userId: string, channelId: string, s: PlaybookSettings) =>
-  `pbinflight:${userId}:${channelId}:${s.windowDays}:${s.maxVideos}:${s.outlierThreshold}`;
+const inflightKey = playbookInflightKey;
 
 export async function loadOwnedPlaybook(
   store: PlaybookStore,
@@ -219,8 +221,15 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
     if (ref === "mine") throw new MatchCutError("YOUTUBE_NOT_CONNECTED");
 
     // Resolve now (cached 24 h): an unknown channel fails at once, and the repeat check needs
-    // the channel ID. A YouTube outage other than quota leaves it to the worker.
-    const resolved = await deps.channels.resolve(ref, { refresh: forceRefresh });
+    // the channel ID. A YouTube outage other than quota leaves it to the worker. Never refreshed
+    // here: the worker re-resolves for force_refresh, after the request has taken its slot.
+    // At the limit, only a repeat or an attach can succeed, and both follow a recent playbook,
+    // so the channel is in the cache: a miss is refused without spending a YouTube call.
+    const full = deps.limiter ? await deps.limiter.full("playbook", who) : { ok: true as const };
+    const resolved = await deps.channels.resolve(ref, { cacheOnly: !full.ok });
+    if (!full.ok && resolved.status === "unavailable" && resolved.reason === "not_cached") {
+      throw rateLimited(full);
+    }
     if (resolved.status === "not_found")
       return countBadInput(new MatchCutError("CHANNEL_NOT_FOUND"));
     if (resolved.status === "unavailable" && resolved.reason === "quota") {
@@ -229,10 +238,13 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
     const channel = resolved.status === "found" ? resolved.channel : null;
     const inflight = channel ? inflightKey(userId, channel.id, settings) : null;
 
-    /** Same user, channel and settings, still running: that job, if any. */
-    const runningFor = async (): Promise<PlaybookRecord | null> => {
+    /**
+     * Same user, channel and settings, still running: that job, if any. `wait`: the key may
+     * name a playbook another request is creating right now, so give it a moment to appear.
+     */
+    const runningFor = async (wait = false): Promise<PlaybookRecord | null> => {
       const id = inflight ? await kv.get(inflight) : null;
-      const running = id ? await store.get(id) : null;
+      const running = id ? await (wait ? waitFor(id) : store.get(id)) : null;
       return running && running.userId === userId && !isTerminal(running.status) ? running : null;
     };
     const remember = async (id: string) => {
@@ -311,7 +323,7 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
     if (inflight && !forceRefresh) {
       const claimed = await kv.setIfAbsent(inflight, record.id, INFLIGHT_TTL_SECONDS);
       if (!claimed) {
-        const running = await runningFor();
+        const running = await runningFor(true);
         if (running) {
           await refund();
           await remember(running.id);
@@ -331,7 +343,7 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
     } catch (e) {
       req.log.error({ err: (e as Error).message, playbookId: record.id }, "job store unavailable");
       if (created) await store.delete(record.id).catch(() => {});
-      if (inflight) await kv.del(inflight);
+      if (inflight && (await kv.get(inflight)) === record.id) await kv.del(inflight);
       await refund();
       throw new MatchCutError("INTERNAL", {}, { reason: "job_store_down" });
     }
@@ -351,7 +363,7 @@ export async function playbooksRoutes(app: FastifyInstance, deps: PlaybooksRoute
         { status: "cancelled", stage: null, progress: null },
         { onlyIfStatus: RUNNING },
       );
-      if (pb.channel) await kv.del(inflightKey(pb.userId, pb.channel.id, pb.settings));
+      await releasePlaybookInflight(kv, pb);
       // Finished in the meantime: deleting is what the user asked for.
       if (!cancelled) await store.delete(pb.id);
     } else {

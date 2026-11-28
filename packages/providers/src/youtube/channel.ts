@@ -36,7 +36,7 @@ export interface ChannelVideo {
 
 /** Why the Data API couldn't answer. `quota` maps to CAPACITY_EXHAUSTED. */
 export type UnavailableReason =
-  "quota" | "timeout" | "network" | "bad_json" | "mock" | `http_${number}`;
+  "quota" | "timeout" | "network" | "bad_json" | "mock" | "not_cached" | `http_${number}`;
 
 export type ChannelResult =
   | { status: "found"; channel: ChannelInfo }
@@ -56,6 +56,11 @@ export interface UploadsQuery {
 export interface LookupOptions {
   /** Skip cached answers and fetch again (PRD: force_refresh refetches stats). */
   refresh?: boolean;
+  /**
+   * Answer only from the cache: a miss is `unavailable` with reason `not_cached`, and costs no
+   * YouTube call. Lookups without a cache (mock, uncached) ignore it.
+   */
+  cacheOnly?: boolean;
 }
 
 export interface ChannelLookup {
@@ -381,6 +386,7 @@ export class CachedChannelLookup implements ChannelLookup {
         return { status: "found", channel: hit };
       }
     }
+    if (opts.cacheOnly) return { status: "unavailable", reason: "not_cached" };
     const result = await this.inner.resolve(ref, opts);
     if (result.status === "found") {
       await this.write(key, JSON.stringify(result.channel), this.ttlSeconds);

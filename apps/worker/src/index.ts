@@ -20,6 +20,7 @@ import {
   SpendTracker,
   type JobData,
   type PlaybookJobData,
+  type PlaybookRecord,
 } from "@match-cut/infra";
 import {
   CachedChannelLookup,
@@ -31,7 +32,7 @@ import {
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { runJob, type PipelineDeps } from "./pipeline.js";
-import { runPlaybookJob } from "./playbook-pipeline.js";
+import { failDeadPlaybook, failStalePlaybooks, runPlaybookJob } from "./playbook-pipeline.js";
 import { buildAnalyzer, pipelineSettings } from "./setup.js";
 
 const env = loadEnv();
@@ -83,6 +84,7 @@ const limiter = new RateLimiter(
     regeneratePerHour: env.RATE_REGENERATE_PER_HOUR,
     orgPerDay: env.RATE_ORG_PER_DAY,
     playbooksPerDay: env.RATE_PLAYBOOKS_PER_DAY,
+    orgPlaybooksPerDay: env.RATE_ORG_PLAYBOOKS_PER_DAY,
   }),
 );
 
@@ -153,9 +155,41 @@ const playbookWorker = new Worker<PlaybookJobData>(
     maxStalledCount: 1,
   },
 );
-playbookWorker.on("failed", (job, err) =>
-  console.error(`[worker] playbook job ${job?.id} crashed: ${err.message}`),
-);
+const deadPlaybookDeps = {
+  store: playbookStore,
+  kv,
+  events: deps.events,
+  refund: (pb: PlaybookRecord) => limiter.refund("playbook", pb, pb.createdAt),
+  log,
+};
+playbookWorker.on("failed", (job, err) => {
+  console.error(`[worker] playbook job ${job?.id} crashed: ${err.message}`);
+  // The job won't run again (one attempt; stalled twice ends here too): don't leave it running.
+  const id = job?.data.playbookId;
+  if (id) {
+    void failDeadPlaybook(deadPlaybookDeps, id, "job_failed").catch((e) =>
+      console.warn(`[worker] could not fail playbook ${id}: ${(e as Error).message}`),
+    );
+  }
+});
+
+// A playbook still running long after its time limit and queue wait lost its job some other way
+// (the queue was flushed, or recording the failure failed): fail it, so it doesn't wait forever.
+const PLAYBOOK_STALE_MS =
+  env.PLAYBOOK_TIMEOUT_SECONDS * 1000 + env.QUEUE_MAX_WAIT_SECONDS * 1000 + 5 * 60_000;
+async function sweepStalePlaybooks() {
+  try {
+    const n = await failStalePlaybooks({
+      ...deadPlaybookDeps,
+      staleAfterMs: PLAYBOOK_STALE_MS,
+      now: Date.now,
+    });
+    if (n > 0) log("stale playbooks failed", { count: n });
+  } catch (e) {
+    console.warn(`[worker] stale playbook sweep failed: ${(e as Error).message}`);
+  }
+}
+const staleTimer = setInterval(sweepStalePlaybooks, 5 * 60_000);
 
 // PRD retention: briefs (and their goal text) are deleted after BRIEF_RETENTION_DAYS; playbooks
 // (public YouTube statistics) after PLAYBOOK_RETENTION_DAYS. Saved skills keep only a snapshot of
@@ -204,6 +238,7 @@ const opsTimer = setInterval(opsCheck, 5 * 60_000);
 const shutdown = async () => {
   clearInterval(retentionTimer);
   clearInterval(opsTimer);
+  clearInterval(staleTimer);
   // Both queues stop taking jobs at once. A playbook can run for minutes, so the wait is bounded:
   // an unfinished job is picked up again by another worker (stalled), resuming from the caches.
   await Promise.race([

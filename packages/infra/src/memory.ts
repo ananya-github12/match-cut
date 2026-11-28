@@ -170,6 +170,13 @@ export class MemoryPlaybookStore implements PlaybookStore {
     return [...this.rows.values()].filter((r) => r.userId === userId && r.createdAt >= since)
       .length;
   }
+  async listStale(before: Date, limit: number) {
+    return [...this.rows.values()]
+      .filter((r) => (r.status === "queued" || r.status === "processing") && r.updatedAt < before)
+      .sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
 }
 
 /** Most recently used (or created) first, then newest, then ID: the same order as Postgres. */

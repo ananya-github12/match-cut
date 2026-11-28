@@ -125,12 +125,32 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
     const models = new Set<string>();
     /** Every failed attempt, for logs and ops signals (PRD: finish reasons per job). */
     const failures: UpstreamFailure[] = [];
-    const giveUp = (err: MatchCutError) =>
-      new MatchCutError(
+    /** Tokens billed for failed attempts that got a response (blocked, recitation, empty). */
+    const spent: { model: string; inputTokens: number; outputTokens: number }[] = [];
+    const giveUp = (err: MatchCutError) => {
+      const { attemptTokens: _t, ...detail } = err.detail ?? {};
+      return new MatchCutError(
         err.error.code,
         {},
-        { ...(err.detail ?? {}), attempts, models: [...models], failures },
+        {
+          ...detail,
+          attempts,
+          models: [...models],
+          failures,
+          // Callers that track cost count these (one entry per billed attempt).
+          ...(spent.length
+            ? {
+                usage: spent.map((u) => ({
+                  model: u.model,
+                  tokens: { input: u.inputTokens, output: u.outputTokens },
+                  fallbackUsed: u.model !== input.model,
+                  upstreamFailures: [],
+                })),
+              }
+            : {}),
+        },
       );
+    };
 
     let round = 0;
     for (let i = 0; ;) {
@@ -184,8 +204,17 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
       try {
         const res = await call({ ...input, model }, attempt.signal, { ...ctx, hint, timeoutMs });
         opts.onAttempt?.({ model, attempt: attempts, hint });
+        // Earlier billed failures are added to this call's usage (priced as this model).
+        const extra = spent.reduce(
+          (t, u) => ({ input: t.input + u.inputTokens, output: t.output + u.outputTokens }),
+          { input: 0, output: 0 },
+        );
         return {
           ...res,
+          usage: {
+            inputTokens: res.usage.inputTokens + extra.input,
+            outputTokens: res.usage.outputTokens + extra.output,
+          },
           model,
           attempts,
           fallbackUsed: model !== input.model,
@@ -199,6 +228,9 @@ export function withFallback(inner: VideoAnalyzer, opts: FallbackOptions): Video
             : caught;
         if (!(err instanceof MatchCutError)) throw err;
         opts.onAttempt?.({ model, attempt: attempts, error: err, hint });
+        const t = err.detail?.attemptTokens as
+          { inputTokens: number; outputTokens: number } | undefined;
+        if (t && (t.inputTokens > 0 || t.outputTokens > 0)) spent.push({ model, ...t });
         failures.push({
           model,
           code: err.error.code,

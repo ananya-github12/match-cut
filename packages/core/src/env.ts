@@ -54,6 +54,11 @@ export const envSchema = z
     RATE_ORG_PER_DAY: z.coerce.number().int().positive().default(1000),
     /** PRD-playbooks.md, limits (proposed): 5 playbooks per user per day. */
     RATE_PLAYBOOKS_PER_DAY: z.coerce.number().int().positive().default(5),
+    /**
+     * Playbooks per org per day (drafted in M10; not in the PRD). A playbook is about 22 model
+     * calls, and the per-user limit alone resets with a new user ID.
+     */
+    RATE_ORG_PLAYBOOKS_PER_DAY: z.coerce.number().int().positive().default(50),
     /** AES-256-GCM key for goal text at rest, base64 of 32 bytes. Required in production. */
     GOAL_ENCRYPTION_KEY: optionalString,
     /** Comma-separated previous keys, still accepted for reading after a rotation. */

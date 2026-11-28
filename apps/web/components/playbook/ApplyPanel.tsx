@@ -8,7 +8,7 @@ import type { ApplyResponse } from "@match-cut/core/playbooks/apply";
 import { GOAL_MAX_CHARS } from "@match-cut/core/schemas";
 import { useState } from "react";
 import { ApiFailure } from "../../lib/api";
-import { uiError, warningText, type UiError } from "../../lib/errors-ui";
+import { applyWarningText, uiError, type UiError } from "../../lib/errors-ui";
 import type { ApplyBody } from "../../lib/playbook-api";
 import { P } from "../../lib/playbook-strings";
 import { FORMATS, S } from "../../lib/strings";
@@ -170,7 +170,7 @@ export function ApplyPanel(props: {
             {sent && <div className={css.note}>{S.directorAck}</div>}
           </div>
           {result.warnings.map((w) => {
-            const text = warningText(w.code);
+            const text = applyWarningText(w.code);
             return text ? (
               <div key={w.code} className={css.note}>
                 {text}

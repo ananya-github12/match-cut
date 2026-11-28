@@ -155,6 +155,44 @@ describe("withFallback", () => {
     }
   });
 
+  it("counts the tokens of refused attempts: added on success, listed on failure", async () => {
+    const recitation = () =>
+      new MatchCutError(
+        "INVALID_MODEL_OUTPUT",
+        {},
+        { finishReason: "RECITATION", attemptTokens: { inputTokens: 40, outputTokens: 7 } },
+      );
+    const recovered = scripted([recitation(), "ok"]);
+    const res = await withFallback(recovered.inner, opts).watch(input);
+    expect(res.usage).toEqual({ inputTokens: 41, outputTokens: 8 });
+
+    const blocked = new MatchCutError(
+      "CONTENT_BLOCKED",
+      {},
+      { finishReason: "SAFETY", attemptTokens: { inputTokens: 30, outputTokens: 2 } },
+    );
+    const failed = scripted([recitation(), blocked]);
+    const err = (await withFallback(failed.inner, opts)
+      .watch(input)
+      .catch((e: unknown) => e)) as MatchCutError;
+    expect(err).toMatchObject({ error: { code: "CONTENT_BLOCKED" } });
+    expect(err.detail?.attemptTokens).toBeUndefined();
+    expect(err.detail?.usage).toEqual([
+      {
+        model: "flash",
+        tokens: { input: 40, output: 7 },
+        fallbackUsed: false,
+        upstreamFailures: [],
+      },
+      {
+        model: "flash",
+        tokens: { input: 30, output: 2 },
+        fallbackUsed: false,
+        upstreamFailures: [],
+      },
+    ]);
+  });
+
   it("cancellation stops at once, even during a backoff", async () => {
     const c = new AbortController();
     const reason = new Error("cancelled");

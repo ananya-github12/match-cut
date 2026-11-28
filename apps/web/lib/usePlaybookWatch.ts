@@ -49,6 +49,8 @@ export function usePlaybookWatch(
       try {
         handle(await getPlaybook(playbookId));
       } catch (e) {
+        // A late answer for a playbook this hook no longer follows must not clear a newer one.
+        if (stopped) return;
         if (e instanceof ApiFailure && (e.code === "PLAYBOOK_NOT_FOUND" || e.status === 404)) {
           finish();
           cb.current.onGone(e.code);

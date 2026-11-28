@@ -12,7 +12,7 @@ import {
   PASS2_PROMPT_VERSION,
   PASS2_TTL_SECONDS,
   pass2OutputSchema,
-  warning,
+  applyWarning,
   type ApplyRecipe,
   type ApplyRequest,
   type ApplyResponse,
@@ -154,10 +154,14 @@ export async function runApply(
           );
   } catch (e) {
     // Calls that failed still cost tokens: count them toward the daily spend.
+    // One entry, or one per billed attempt (withFallback).
     const usage = e instanceof MatchCutError ? e.detail?.usage : undefined;
-    if (deps.pricing && usage && typeof usage === "object") {
-      const u = usage as { model: string; tokens: { input: number; output: number } };
-      await deps.spend?.add(costUsd(deps.pricing, u.model, u.tokens));
+    const spent = (Array.isArray(usage) ? usage : usage ? [usage] : []) as {
+      model: string;
+      tokens: { input: number; output: number };
+    }[];
+    if (deps.pricing) {
+      for (const u of spent) await deps.spend?.add(costUsd(deps.pricing, u.model, u.tokens));
     }
     if (e instanceof MatchCutError && NOT_USERS_FAULT.has(e.error.code)) await refund();
     throw e;
@@ -170,7 +174,7 @@ export async function runApply(
   }
   return {
     ...run.output,
-    warnings: run.shotListDropped ? [warning("SHOT_LIST_UNAVAILABLE")] : [],
+    warnings: run.shotListDropped ? [applyWarning("SHOT_LIST_UNAVAILABLE")] : [],
     meta: {
       model: run.model,
       prompt_version: version,

@@ -30,6 +30,7 @@ export function SkillsPage() {
   const platform = useMemo(detectPlatform, []);
   const [skills, setSkills] = useState<SkillSummaryResponse[] | null>(null);
   const [details, setDetails] = useState<Record<string, SkillResponse>>({});
+  const [detailsFailed, setDetailsFailed] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<UiError | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const ctx = useCallback(
@@ -57,11 +58,11 @@ export function SkillsPage() {
     const next = open === s.id ? null : s.id;
     setOpen(next);
     if (next && !details[s.id]) {
+      setDetailsFailed((m) => ({ ...m, [s.id]: false }));
       void getSkill(s.id)
         .then((d) => setDetails((m) => ({ ...m, [s.id]: d })))
-        .catch(() => {
-          /* the panel still works; the caveats just don't show */
-        });
+        // The panel still works; say the age and caveats are missing rather than hide them.
+        .catch(() => setDetailsFailed((m) => ({ ...m, [s.id]: true })));
     }
   };
 
@@ -145,6 +146,11 @@ export function SkillsPage() {
                     {detail && (
                       <div className={css.muted} data-testid="skill-age">
                         {P.skillAge(detail.snapshot.generated_at)}
+                      </div>
+                    )}
+                    {!detail && detailsFailed[s.id] && (
+                      <div className={css.note} role="status">
+                        {P.skillDetailsUnavailable}
                       </div>
                     )}
                     {caveats(detail).map((text) => (
