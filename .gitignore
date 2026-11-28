@@ -10,3 +10,6 @@ test-results/
 playwright-report/
 evals/reports/
 *.tsbuildinfo
+
+# Local Redis snapshots (e.g. a redis-server started in the repo for e2e tests)
+dump.rdb
