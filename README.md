@@ -84,6 +84,8 @@ pnpm eval -- --gate                         # fail if any criterion drops below 
 pnpm eval -- --set golden --provider gemini --judge gemini --review --yes   # real run (paid)
 ```
 
+Playbooks have their own set: `pnpm eval -- --set playbooks --review --gate` builds a playbook for each case in `evals/playbooks/cases.json` (10 golden mock channels with planted patterns, plus edge cases) and checks faithfulness, planted patterns, warnings and apply. Real channels run with `--provider gemini --yes` once someone picks them and writes their notes.
+
 Cases live in `evals/golden/cases.json`; each needs a human-written reference in `evals/golden/references/<id>.json` (template: `_TEMPLATE.json`) before it runs. Rubric: `evals/RUBRIC.md`. Reports go to `evals/reports/` (git-ignored); `--review` adds the human review sheet.
 
 ## Ops

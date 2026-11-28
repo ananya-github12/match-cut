@@ -1,0 +1,309 @@
+{
+  "target_size": 30,
+  "as_of": "2026-11-24T12:00:00Z",
+  "apply": {
+    "goal": "a 30-second video about my coffee cart",
+    "format": "9:16",
+    "length_seconds": 30
+  },
+  "cases": [
+    {
+      "id": "golden-01",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden01"
+      },
+      "category": "hook_type=question + caption_style=word_by_word",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "question"],
+          ["caption_style", "word_by_word"]
+        ]
+      },
+      "note": "Breakouts open by asking the viewer a question and caption speech word by word; typical uploads open on a statement with phrase captions.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-02",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden02"
+      },
+      "category": "hook_type=result_first + zoom_punch_ins=frequent",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "result_first"],
+          ["zoom_punch_ins", "frequent"]
+        ],
+        "warnings": ["TOPIC_CONFOUND"]
+      },
+      "note": "Breakouts show the finished result first and punch in on most cuts; typical uploads build up to the result with a steady frame. Most breakouts are about budgeting, so the topic may explain part of it.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-03",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden03"
+      },
+      "category": "first_words_timing=under_1s + text_on_screen_first_second=yes",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["first_words_timing", "under_1s"],
+          ["text_on_screen_first_second", "yes"]
+        ]
+      },
+      "note": "Breakouts start talking within the first second and put text on screen at once; typical uploads hold on a visual before speaking. One breakout breaks the first-words pattern.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-04",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden04"
+      },
+      "category": "hook_type=bold_claim + music=trending_or_upbeat",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "bold_claim"],
+          ["music", "trending_or_upbeat"]
+        ]
+      },
+      "note": "Breakouts lead with a bold claim over an upbeat track; typical uploads open softly with ambient or no music.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-05",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden05"
+      },
+      "category": "ending=loop + caption_style=word_by_word",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["ending", "loop"],
+          ["caption_style", "word_by_word"]
+        ]
+      },
+      "note": "Breakouts end on a shot that loops back to the opening and caption word by word; typical uploads end on a call to action.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-06",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden06"
+      },
+      "category": "hook_type=question + caption_style=word_by_word",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "question"],
+          ["caption_style", "word_by_word"]
+        ]
+      },
+      "note": "Breakouts open by asking the viewer a question and caption speech word by word; typical uploads open on a statement with phrase captions. (Same pattern as golden-01, different uploads.)",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-07",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden07"
+      },
+      "category": "hook_type=result_first + zoom_punch_ins=frequent",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "result_first"],
+          ["zoom_punch_ins", "frequent"]
+        ]
+      },
+      "note": "Breakouts show the finished result first and punch in on most cuts; typical uploads build up to the result with a steady frame. Most breakouts are about budgeting, so the topic may explain part of it. (Same pattern as golden-02, different uploads.)",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-08",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden08"
+      },
+      "category": "first_words_timing=under_1s + text_on_screen_first_second=yes",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["first_words_timing", "under_1s"],
+          ["text_on_screen_first_second", "yes"]
+        ]
+      },
+      "note": "Breakouts start talking within the first second and put text on screen at once; typical uploads hold on a visual before speaking. One breakout breaks the first-words pattern. (Same pattern as golden-03, different uploads.)",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-09",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden09"
+      },
+      "category": "hook_type=bold_claim + music=trending_or_upbeat",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["hook_type", "bold_claim"],
+          ["music", "trending_or_upbeat"]
+        ]
+      },
+      "note": "Breakouts lead with a bold claim over an upbeat track; typical uploads open softly with ambient or no music. (Same pattern as golden-04, different uploads.)",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "golden-10",
+      "source": {
+        "type": "mock",
+        "handle": "mockgolden10"
+      },
+      "category": "ending=loop + caption_style=word_by_word",
+      "expect": {
+        "outcome": "succeeded",
+        "planted": [
+          ["ending", "loop"],
+          ["caption_style", "word_by_word"]
+        ]
+      },
+      "note": "Breakouts end on a shot that loops back to the opening and caption word by word; typical uploads end on a call to action. (Same pattern as golden-05, different uploads.)",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-tiny",
+      "source": {
+        "type": "mock",
+        "handle": "mocktiny"
+      },
+      "category": "too few Shorts",
+      "expect": {
+        "outcome": "NOT_ENOUGH_DATA",
+        "reasons": ["TOO_FEW_SHORTS"]
+      },
+      "note": "A new channel with a handful of Shorts: there's nothing to compare yet, and the playbook should say so.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-flat",
+      "source": {
+        "type": "mock",
+        "handle": "mockflat"
+      },
+      "category": "no breakouts",
+      "expect": {
+        "outcome": "NOT_ENOUGH_DATA",
+        "reasons": ["TOO_FEW_BREAKOUTS"]
+      },
+      "note": "Every Short gets about the same views: no breakouts, so no playbook.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-mixed",
+      "source": {
+        "type": "mock",
+        "handle": "mockmixed"
+      },
+      "category": "Shorts and long videos",
+      "expect": {
+        "outcome": "succeeded",
+        "warnings": ["MIXED_FORMATS"]
+      },
+      "note": "Posts long videos too; only Shorts are compared, and the playbook warns about it. No edit pattern was planted.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-hidden",
+      "source": {
+        "type": "mock",
+        "handle": "mockhidden"
+      },
+      "category": "hidden likes",
+      "expect": {
+        "outcome": "succeeded",
+        "warnings": ["LIKES_HIDDEN"]
+      },
+      "note": "Some Shorts hide their likes; engagement counts comments only, with a warning. No edit pattern was planted.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-new",
+      "source": {
+        "type": "mock",
+        "handle": "mocknew"
+      },
+      "category": "recent uploads",
+      "expect": {
+        "outcome": "succeeded",
+        "warnings": ["RECENT_VIDEOS_EXCLUDED"]
+      },
+      "note": "Several uploads are under 7 days old: they're left out of scoring and counted in a warning. No edit pattern was planted.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "edge-gone",
+      "source": {
+        "type": "mock",
+        "handle": "mockgone"
+      },
+      "category": "unknown channel",
+      "expect": {
+        "outcome": "CHANNEL_NOT_FOUND"
+      },
+      "note": "A handle that doesn't exist.",
+      "note_by": "fixture design (mock channel)",
+      "status": "ready"
+    },
+    {
+      "id": "real-01",
+      "source": {
+        "type": "channel",
+        "channel": null
+      },
+      "category": "real channel (to pick)",
+      "expect": {
+        "outcome": "succeeded"
+      },
+      "note": "",
+      "note_by": "",
+      "status": "needs_channel"
+    },
+    {
+      "id": "real-02",
+      "source": {
+        "type": "channel",
+        "channel": null
+      },
+      "category": "real channel (to pick)",
+      "expect": {
+        "outcome": "succeeded"
+      },
+      "note": "",
+      "note_by": "",
+      "status": "needs_channel"
+    }
+  ]
+}

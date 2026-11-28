@@ -10,6 +10,7 @@
   "dependencies": {
     "@google/genai": "2.32.0",
     "@match-cut/core": "workspace:*",
+    "@match-cut/infra": "workspace:*",
     "@match-cut/providers": "workspace:*",
     "@match-cut/worker": "workspace:*",
     "zod": "^3.25.0"

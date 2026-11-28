@@ -305,6 +305,9 @@ importers:
       '@match-cut/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@match-cut/infra':
+        specifier: workspace:*
+        version: link:../packages/infra
       '@match-cut/providers':
         specifier: workspace:*
         version: link:../packages/providers

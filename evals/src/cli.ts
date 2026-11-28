@@ -3,6 +3,7 @@
  *
  *   pnpm eval                       smoke set, mock provider, mock judge (free, offline)
  *   pnpm eval --set golden --provider gemini --judge gemini --yes
+ *   pnpm eval --set playbooks       playbooks for the golden channels, mock mode (free, offline)
  *   options: --only <case id>  --gate  --update-baseline  --review
  *
  * Real runs call the paid Gemini API (two passes per case, plus the judge) and need --yes.
@@ -46,13 +47,17 @@ const opt = (name: string) =>
 const setName = opt("set") ?? "smoke";
 const provider = opt("provider") ?? "mock";
 const judgeName = opt("judge") ?? "mock";
+if (setName === "playbooks") {
+  await runPlaybooks();
+  process.exit(process.exitCode ?? 0);
+}
 if (
   !["smoke", "golden"].includes(setName) ||
   !["mock", "gemini"].includes(provider) ||
   !["mock", "gemini"].includes(judgeName)
 ) {
   console.error(
-    "Usage: pnpm eval [--set smoke|golden] [--provider mock|gemini] [--judge mock|gemini] [--only id] [--gate] [--update-baseline] [--review] [--yes]",
+    "Usage: pnpm eval [--set smoke|golden|playbooks] [--provider mock|gemini] [--judge mock|gemini] [--only id] [--gate] [--update-baseline] [--review] [--yes]",
   );
   process.exit(2);
 }
@@ -158,3 +163,106 @@ if (flag("update-baseline")) {
 console.log(markdownReport(info, summary, results, gateResult).split("## Cases")[0]);
 console.log(`Report: ${outDir}/report.md`);
 if (gateResult && !gateResult.ok) process.exit(1);
+
+/**
+ * Playbook evals (PRD-playbooks.md, Quality evaluation). Mock mode runs the 10 golden mock
+ * channels and the edge channels offline. Real channels need --provider gemini and --yes: each
+ * watches up to 10 Shorts with the paid Gemini API and uses YouTube Data API quota.
+ */
+async function runPlaybooks() {
+  const {
+    loadPlaybookSet,
+    playbookReport,
+    playbookReviewSheet,
+    runPlaybookSet,
+    summarizePlaybooks,
+  } = await import("./playbooks.js");
+  const { COMPARISON_VERSION, FEATURES_VERSION, PLAYBOOK_VERSION } =
+    await import("@match-cut/core");
+  const { CachedChannelLookup, MockChannelLookup, YouTubeDataApiChannelLookup } =
+    await import("@match-cut/providers");
+  const { MemoryKV } = await import("@match-cut/infra");
+  if (provider !== "mock" && provider !== "gemini") {
+    console.error(
+      "Usage: pnpm eval --set playbooks [--provider mock|gemini] [--only id] [--gate] [--review] [--yes]",
+    );
+    process.exit(2);
+  }
+  // Loaded here: this runs before the brief evals' module-level setup.
+  const env = loadEnv();
+  const manifest = loadManifest();
+  const pricing = loadPricing();
+  const set = loadPlaybookSet(`${ROOT}playbooks`, provider);
+  const only = opt("only");
+  if (only) set.loaded = set.loaded.filter((c) => c.case.id === only);
+  const runnable = set.loaded.filter((c) => !c.skip);
+  if (provider === "gemini") {
+    if (!env.GEMINI_API_KEY || !env.YOUTUBE_DATA_API_KEY) {
+      console.error("Set GEMINI_API_KEY and YOUTUBE_DATA_API_KEY in .env first.");
+      process.exit(2);
+    }
+    console.log(
+      `${runnable.length} real channels; each watches up to 10 Shorts with the paid Gemini API.`,
+    );
+    if (!flag("yes")) {
+      console.error("This calls the paid Gemini API. Re-run with --yes to proceed.");
+      process.exit(2);
+    }
+  }
+  // Mock channels are generated relative to "now": a fixed clock keeps every run identical.
+  const now = provider === "mock" ? () => Date.parse(set.as_of) : Date.now;
+  const models =
+    provider === "gemini"
+      ? modelNames({ ...env, PROVIDER: "gemini" })
+      : modelNames({ ...env, PROVIDER: "mock" });
+  const analyzer =
+    provider === "gemini"
+      ? withFallback(new GeminiAnalyzer({ apiKey: env.GEMINI_API_KEY! }), {
+          fallbacks: models.fallbacks,
+        })
+      : new MockAnalyzer();
+  const channels =
+    provider === "gemini"
+      ? new CachedChannelLookup(
+          new YouTubeDataApiChannelLookup({ apiKey: env.YOUTUBE_DATA_API_KEY! }),
+          new MemoryKV(),
+        )
+      : new MockChannelLookup({ now: () => new Date(now()) });
+
+  const info = {
+    startedAt: new Date().toISOString(),
+    provider,
+    targetSize: set.target_size,
+    versions: {
+      pass1: PASS1_PROMPT_VERSION,
+      features: FEATURES_VERSION,
+      comparison: COMPARISON_VERSION,
+      playbook: PLAYBOOK_VERSION,
+      manifest: manifest.manifest_version,
+    },
+  };
+  const results = await runPlaybookSet(set, {
+    analyzer,
+    channels,
+    manifest,
+    models,
+    // Mock tokens priced at real rates would read as a real cost: price only real runs.
+    pricing: provider === "gemini" ? pricing : undefined,
+    now,
+    log: (m) => console.log(`  ${m}`),
+  });
+  const summary = summarizePlaybooks(results);
+  const outDir = `${ROOT}reports/${info.startedAt.replace(/[:.]/g, "-")}-playbooks-${provider}`;
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(
+    `${outDir}/report.json`,
+    JSON.stringify({ info, summary, results }, null, 2) + "\n",
+  );
+  const report = playbookReport(info, summary, results);
+  writeFileSync(`${outDir}/report.md`, report);
+  if (flag("review")) writeFileSync(`${outDir}/review.md`, playbookReviewSheet(results));
+  console.log(report.split("## Cases")[0]);
+  console.log(`Report: ${outDir}/report.md`);
+  // --gate: every case that ran must pass.
+  if (flag("gate") && summary.passed < summary.ran) process.exitCode = 1;
+}

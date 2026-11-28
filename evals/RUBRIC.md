@@ -24,6 +24,33 @@ each one against the reference facts:
 
 Wrong rate = contradicted ÷ (consistent + contradicted).
 
+## Playbooks
+
+Source: PRD-playbooks.md, "Quality evaluation". `pnpm eval -- --set playbooks` builds a playbook for
+each case in `evals/playbooks/cases.json` with the real pipeline and checks it in code
+(`src/playbooks.ts`):
+
+| Check    | Passes when                                                                                                                         |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| outcome  | The playbook succeeds, or fails with the expected code (and, for `NOT_ENOUGH_DATA`, the expected reasons)                           |
+| faithful | Evidence and confidence equal the comparison; examples are real moments of breakouts with the value; counterexamples break the rule |
+| planted  | Every planted pattern (mock channels) is a rule, and no other rule is high confidence                                               |
+| warnings | The expected caveats are present                                                                                                    |
+| recipe   | A playbook with rules has a recipe prompt template                                                                                  |
+| apply    | Apply returns a prompt that passes v1's prompt checks and a shot list of 4 to 15 shots                                              |
+
+People score what code can't, 1 to 5 each, on the `--review` sheet against the case's note:
+
+| Criterion   | Question                                                                       |
+| ----------- | ------------------------------------------------------------------------------ |
+| Correctness | Do the rules match the note on why the channel's outliers worked?              |
+| Usefulness  | Could an editor act on each rule without watching the channel?                 |
+| Honesty     | Does "what the edit doesn't explain" name the topic, timing and other factors? |
+| Originality | Is the recipe about craft, with none of the channel's words, names or topics?  |
+
+A real channel runs only once someone has picked it and written its note (`status: "ready"`). The
+golden channels start as mock channels with planted patterns; their notes describe the fixture.
+
 ## Gate
 
 `pnpm eval --gate` compares a run against `evals/baseline.json`. A change ships only if every
